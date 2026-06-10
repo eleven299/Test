@@ -1,0 +1,27 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.log
+*.pot
+.DS_Store
+.env
+.venv/
+venv/
+db.sqlite3
+staticfiles/
+media/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Claude
+.claude/
