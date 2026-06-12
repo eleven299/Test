@@ -13,8 +13,9 @@ import hashlib
 import re
 import logging
 
-from ..models import AppElement
+from ..models import AppElement, AppProject
 from ..serializers import AppElementSerializer
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -59,25 +60,22 @@ class AppElementViewSet(viewsets.ModelViewSet):
         instance.delete()
     
     def get_queryset(self):
-        """
-        自定义查询集，支持名称和标签搜索
-        
-        - 名称：模糊匹配（LIKE）
-        - 标签：精确匹配 JSONField 数组中的元素
-        """
-        queryset = super().get_queryset()
-        
+        user = self.request.user
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=user) | Q(members=user)
+        ).distinct()
+        queryset = AppElement.objects.filter(is_active=True, project__in=accessible_projects)
+
         # 获取搜索关键词
         search = self.request.query_params.get('search', '').strip()
         if search:
-            from django.db.models import Q
             from django.db import connection
             import json
-            
+
             if 'mysql' in connection.vendor:
                 # MySQL: 使用 JSON_CONTAINS 查询
                 search_json = json.dumps(search)  # "登录" → '"登录"'
-                
+
                 # 不使用表名前缀，让 Django 自动处理
                 queryset = queryset.extra(
                     where=["name LIKE %s OR JSON_CONTAINS(tags, %s)"],
@@ -86,7 +84,7 @@ class AppElementViewSet(viewsets.ModelViewSet):
             else:
                 # PostgreSQL: 使用 @> 运算符
                 queryset = queryset.filter(
-                    Q(name__icontains=search) | 
+                    Q(name__icontains=search) |
                     Q(tags__contains=[search])
                 )
         
@@ -127,6 +125,25 @@ class AppElementViewSet(viewsets.ModelViewSet):
         # 获取参数
         category = request.data.get('category', 'common')
         element_id = request.data.get('element_id')  # 编辑模式时传递，用于排除自身
+
+        # 验证文件类型
+        ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        file_ext = os.path.splitext(file_obj.name)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            return Response({
+                'code': 400,
+                'msg': f'不支持的文件类型: {file_ext}，仅支持 {", ".join(ALLOWED_EXTENSIONS)}',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 防止路径遍历 — 清理 category 名称
+        category = re.sub(r'[^\w\-.]', '', category)
+        if not category:
+            category = 'common'
+
+        # 防止路径遍历 — 清理文件名
+        safe_name = os.path.basename(file_obj.name)
+        safe_name = re.sub(r'[^\w\-.]', '', os.path.splitext(safe_name)[0]) + file_ext
         
         try:
             # ✅ 业务逻辑内联：计算文件哈希
@@ -168,8 +185,8 @@ class AppElementViewSet(viewsets.ModelViewSet):
             category_path = template_base / category
             category_path.mkdir(parents=True, exist_ok=True)
             
-            # 使用原始文件名
-            file_path = category_path / file_obj.name
+            # 使用安全文件名
+            file_path = category_path / safe_name
             
             # 保存文件
             with open(file_path, 'wb+') as destination:
@@ -177,7 +194,7 @@ class AppElementViewSet(viewsets.ModelViewSet):
                     destination.write(chunk)
             
             # 构建相对路径（直接返回 category/filename.png）
-            relative_path = f"{category}/{file_obj.name}"
+            relative_path = f"{category}/{safe_name}"
             
             logger.info(f"用户 {request.user.username} 上传图片: {relative_path}, 哈希: {file_hash}")
             
@@ -437,6 +454,10 @@ class AppElementViewSet(viewsets.ModelViewSet):
             element_name = request.data.get('element_name', 'captured_element')
             category = request.data.get('category', 'common')
             element_type = request.data.get('element_type', 'image')  # image/pos/region
+
+            # 防止路径遍历
+            category = re.sub(r'[^\w\-.]', '', category) or 'common'
+            element_name = re.sub(r'[^\w\-.]', '', element_name) or 'captured_element'
             
             # 解码 Base64 图片
             if image_data.startswith('data:image'):

@@ -1,11 +1,11 @@
 from rest_framework import generics, status, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from django.contrib.auth import login, logout
+from django.contrib.auth import logout
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from .models import User
-from .serializers import UserSerializer, UserCreateSerializer, LoginSerializer
+from .serializers import UserSerializer, UserSimpleSerializer, UserCreateSerializer, LoginSerializer
 
 # JWT 相关导入
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -54,9 +54,8 @@ def login_view(request):
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.validated_data['user']
-    login(request, user)
 
-    # JWT Token (优先使用JWT)
+    # JWT Token
     refresh = RefreshToken.for_user(user)
     access_token = str(refresh.access_token)
     refresh_token = str(refresh)
@@ -94,15 +93,23 @@ def profile_view(request):
     serializer = UserSerializer(request.user)
     return Response(serializer.data)
 
-class UserListView(generics.ListCreateAPIView):
+class UserListView(generics.ListAPIView):
+    """用户列表 — 认证用户可访问，返回基本信息（评审等功能需要）"""
+    queryset = User.objects.all().order_by('username')
+    serializer_class = UserSimpleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+class UserDetailView(generics.RetrieveUpdateAPIView):
+    """用户详情 — 仅限本人或管理员"""
     queryset = User.objects.all().order_by('username')
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = User.objects.all().order_by('username')
-    serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return User.objects.all().order_by('username')
+        return User.objects.filter(id=user.id)
 
 
 # ========== 图形验证码 & 短信验证码 ==========

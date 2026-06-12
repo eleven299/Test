@@ -6,9 +6,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Q
 import logging
 
-from ..models import AppTestSuite, AppTestSuiteCase, AppTestCase, AppDevice, AppTestExecution
+from ..models import AppTestSuite, AppTestSuiteCase, AppTestCase, AppDevice, AppTestExecution, AppProject
 from .test_case_views import AppPagination
 from ..serializers import (
     AppTestSuiteSerializer,
@@ -29,6 +30,13 @@ class AppTestSuiteViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = ['project']
     search_fields = ['name', 'description']
+
+    def get_queryset(self):
+        user = self.request.user
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=user) | Q(members=user)
+        ).distinct()
+        return AppTestSuite.objects.filter(project__in=accessible_projects)
 
     def get_serializer_class(self):
         if self.action == 'create':

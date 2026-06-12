@@ -1,6 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.db import transaction
 from .models import TestPlan, TestRun, TestRunCase, TestRunCaseHistory
@@ -16,6 +17,17 @@ class TestPlanViewSet(viewsets.ModelViewSet):
     """
     queryset = TestPlan.objects.all().order_by('-created_at')
     serializer_class = TestPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        from django.db.models import Q as db_Q
+        accessible_projects = Project.objects.filter(
+            db_Q(owner=user) | db_Q(members=user)
+        ).distinct()
+        return TestPlan.objects.filter(
+            projects__in=accessible_projects
+        ).distinct().order_by('-created_at')
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -124,10 +136,17 @@ class TestPlanViewSet(viewsets.ModelViewSet):
                     'detail': '请选择有效的项目'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # 获取指定项目的测试用例
+            # 校验用户有权限访问的项目
+            from django.db.models import Q as db_Q
+            accessible_projects = Project.objects.filter(
+                db_Q(owner=request.user) | db_Q(members=request.user)
+            ).distinct()
+            valid_project_ids = set(accessible_projects.filter(id__in=project_ids).values_list('id', flat=True))
+
+            # 获取指定项目的测试用例（仅限用户可访问的项目）
             testcases = TestCase.objects.filter(
-                project_id__in=project_ids,
-                status__in=['draft', 'active']  # 包含草稿和激活状态的测试用例
+                project_id__in=valid_project_ids,
+                status__in=['draft', 'active']
             ).values('id', 'title', 'priority', 'test_type', 'project__name')
             
             return Response({
@@ -176,6 +195,18 @@ class TestRunViewSet(viewsets.ModelViewSet):
     """
     queryset = TestRun.objects.all().order_by('-created_at')
     serializer_class = TestRunSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        from django.db.models import Q as db_Q
+        accessible_projects = Project.objects.filter(
+            db_Q(owner=user) | db_Q(members=user)
+        ).distinct()
+        return TestRun.objects.filter(
+            project__in=accessible_projects
+        ).distinct().order_by('-created_at')
+
 
 class TestRunCaseViewSet(viewsets.ModelViewSet):
     """
@@ -183,6 +214,17 @@ class TestRunCaseViewSet(viewsets.ModelViewSet):
     """
     queryset = TestRunCase.objects.all()
     serializer_class = TestRunCaseSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        from django.db.models import Q as db_Q
+        accessible_projects = Project.objects.filter(
+            db_Q(owner=user) | db_Q(members=user)
+        ).distinct()
+        return TestRunCase.objects.filter(
+            test_run__project__in=accessible_projects
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -238,3 +280,14 @@ class TestRunCaseHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = TestRunCaseHistory.objects.all().order_by('-executed_at')
     serializer_class = TestRunCaseHistorySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        from django.db.models import Q as db_Q
+        accessible_projects = Project.objects.filter(
+            db_Q(owner=user) | db_Q(members=user)
+        ).distinct()
+        return TestRunCaseHistory.objects.filter(
+            run_case__test_run__project__in=accessible_projects
+        ).order_by('-executed_at')

@@ -9,24 +9,36 @@ from .models import TestReport, ReportTemplate
 from apps.executions.models import TestPlan, TestRun, TestRunCase
 from apps.testcases.models import TestCase
 from apps.requirement_analysis.models import RequirementAnalysis, GeneratedTestCase, BusinessRequirement
+from apps.projects.models import Project
 
-class TestReportViewSet(viewsets.ModelViewSet):
+
+def _get_accessible_project_ids(user):
+    return Project.objects.filter(
+        Q(owner=user) | Q(members=user)
+    ).distinct().values_list('id', flat=True)
+
+
+class TestReportViewSet(viewsets.ViewSet):
     """测试报告视图集"""
-    queryset = TestReport.objects.all()
     permission_classes = [permissions.IsAuthenticated]
-    
+
     @action(detail=False, methods=['get'])
     def dashboard(self, request):
         """获取概览数据"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
-        
-        # 基础查询集
-        plans_qs = TestPlan.objects.filter(is_active=True)
-        cases_qs = TestCase.objects.all()
-        
+
+        # 基础查询集（仅限用户可访问的项目）
+        plans_qs = TestPlan.objects.filter(is_active=True, projects__in=accessible_ids).distinct()
+        cases_qs = TestCase.objects.filter(project_id__in=accessible_ids)
+
         if project_id:
-            plans_qs = plans_qs.filter(projects__id=project_id)
-            cases_qs = cases_qs.filter(project_id=project_id)
+            # 确保请求的project_id在用户可访问范围内
+            pid = int(project_id)
+            if pid not in accessible_ids:
+                return Response({'error': '项目不存在'}, status=404)
+            plans_qs = plans_qs.filter(projects__id=pid)
+            cases_qs = cases_qs.filter(project_id=pid)
             
         # 统计数据
         total_plans = plans_qs.count()
@@ -80,10 +92,11 @@ class TestReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def status_distribution(self, request):
         """获取执行状态分布"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
         version_id = request.query_params.get('version')
-        
-        runs_qs = TestRun.objects.all()
+
+        runs_qs = TestRun.objects.filter(project_id__in=accessible_ids)
         if project_id:
             runs_qs = runs_qs.filter(project_id=project_id)
         if version_id:
@@ -103,9 +116,10 @@ class TestReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def defect_distribution(self, request):
         """获取缺陷分布 (按优先级)"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
-        qs = TestRunCase.objects.filter(status='failed')
-        
+        qs = TestRunCase.objects.filter(status='failed', test_run__project_id__in=accessible_ids)
+
         if project_id:
             qs = qs.filter(test_run__project_id=project_id)
             
@@ -125,9 +139,10 @@ class TestReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def failed_cases_top(self, request):
         """获取失败用例TOP榜"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
-        
-        qs = TestRunCase.objects.filter(status='failed')
+
+        qs = TestRunCase.objects.filter(status='failed', test_run__project_id__in=accessible_ids)
         if project_id:
             qs = qs.filter(test_run__project_id=project_id)
             
@@ -143,26 +158,23 @@ class TestReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def execution_trend(self, request):
         """获取每日执行趋势"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
         days = int(request.query_params.get('days', 7))
-        
-        # 获取当前时区的今天开始时间
+
         current_tz = timezone.get_current_timezone()
         local_now = timezone.localtime(timezone.now())
         today = local_now.date()
-        
-        # 计算起始日期
         start_date = today - timedelta(days=days - 1)
-        
-        # 构造起始时间的 datetime 对象 (00:00:00)
         start_datetime = datetime.combine(start_date, datetime.min.time())
         start_datetime = timezone.make_aware(start_datetime, current_tz)
-        
+
         qs = TestRunCase.objects.filter(
             executed_at__gte=start_datetime,
-            status__in=['passed', 'failed', 'blocked', 'retest']
+            status__in=['passed', 'failed', 'blocked', 'retest'],
+            test_run__project_id__in=accessible_ids
         )
-        
+
         if project_id:
             qs = qs.filter(test_run__project_id=project_id)
             
@@ -195,11 +207,16 @@ class TestReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def ai_efficiency(self, request):
         """获取AI效能分析"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
-        
-        cases_qs = TestCase.objects.all()
-        generated_qs = GeneratedTestCase.objects.all()
-        requirements_qs = BusinessRequirement.objects.all()
+
+        cases_qs = TestCase.objects.filter(project_id__in=accessible_ids)
+        generated_qs = GeneratedTestCase.objects.filter(
+            requirement__analysis__document__project_id__in=accessible_ids
+        )
+        requirements_qs = BusinessRequirement.objects.filter(
+            analysis__document__project_id__in=accessible_ids
+        )
         
         if project_id:
             cases_qs = cases_qs.filter(project_id=project_id)
@@ -236,13 +253,15 @@ class TestReportViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def team_workload(self, request):
         """获取团队工作量"""
+        accessible_ids = _get_accessible_project_ids(request.user)
         project_id = request.query_params.get('project')
-        
+
         qs = TestRunCase.objects.filter(
             status__in=['passed', 'failed', 'blocked', 'retest'],
-            executed_by__isnull=False
+            executed_by__isnull=False,
+            test_run__project_id__in=accessible_ids
         )
-        
+
         if project_id:
             qs = qs.filter(test_run__project_id=project_id)
             

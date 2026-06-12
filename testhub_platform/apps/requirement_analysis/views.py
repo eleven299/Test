@@ -9,7 +9,7 @@ from django.conf import settings  # Added import
 from rest_framework.decorators import action, permission_classes
 from rest_framework.response import Response
 from rest_framework.renderers import BaseRenderer
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 
 class PassThroughRenderer(BaseRenderer):
@@ -53,7 +53,19 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     """需求文档视图集"""
     queryset = RequirementDocument.objects.all()
     serializer_class = RequirementDocumentSerializer
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        user = self.request.user
+        from django.db.models import Q as models_Q
+        from apps.projects.models import Project
+        accessible_projects = Project.objects.filter(
+            models_Q(owner=user) | models_Q(members=user)
+        ).distinct()
+        return RequirementDocument.objects.filter(
+            models_Q(uploaded_by=user) | models_Q(project__in=accessible_projects)
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -189,6 +201,18 @@ class RequirementAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
     """需求分析视图集"""
     queryset = RequirementAnalysis.objects.all()
     serializer_class = RequirementAnalysisSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        from django.db.models import Q as models_Q
+        from apps.projects.models import Project
+        accessible_projects = Project.objects.filter(
+            models_Q(owner=user) | models_Q(members=user)
+        ).distinct()
+        return RequirementAnalysis.objects.filter(
+            models_Q(document__uploaded_by=user) | models_Q(document__project__in=accessible_projects)
+        ).distinct()
 
     @action(detail=True, methods=['get'])
     def requirements(self, request, pk=None):
@@ -203,9 +227,18 @@ class BusinessRequirementViewSet(viewsets.ReadOnlyModelViewSet):
     """业务需求视图集"""
     queryset = BusinessRequirement.objects.all()
     serializer_class = BusinessRequirementSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        user = self.request.user
+        from django.db.models import Q as models_Q
+        from apps.projects.models import Project
+        accessible_projects = Project.objects.filter(
+            models_Q(owner=user) | models_Q(members=user)
+        ).distinct()
+        queryset = BusinessRequirement.objects.filter(
+            models_Q(analysis__document__uploaded_by=user) | models_Q(analysis__document__project__in=accessible_projects)
+        ).distinct()
         analysis_id = self.request.query_params.get('analysis_id')
         if analysis_id:
             queryset = queryset.filter(analysis_id=analysis_id)
@@ -452,18 +485,27 @@ class GeneratedTestCaseViewSet(viewsets.ModelViewSet):
     """生成的测试用例视图集"""
     queryset = GeneratedTestCase.objects.all()
     serializer_class = GeneratedTestCaseSerializer
+    permission_classes = [IsAuthenticated]
     pagination_class = GeneratedTestCasePagination
     http_method_names = ['get', 'patch']  # 只允许GET和PATCH方法
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        user = self.request.user
+        from django.db.models import Q as models_Q
+        from apps.projects.models import Project
+        accessible_projects = Project.objects.filter(
+            models_Q(owner=user) | models_Q(members=user)
+        ).distinct()
+        # 只返回用户上传的需求文档或可访问项目中的生成用例
+        queryset = GeneratedTestCase.objects.filter(
+            models_Q(requirement__analysis__document__uploaded_by=user) |
+            models_Q(requirement__analysis__document__project__in=accessible_projects)
+        ).distinct()
 
-        # 按需求ID过滤
         requirement_id = self.request.query_params.get('requirement_id')
         if requirement_id:
             queryset = queryset.filter(requirement_id=requirement_id)
 
-        # 按状态过滤
         status_param = self.request.query_params.get('status')
         if status_param:
             queryset = queryset.filter(status=status_param)
@@ -551,9 +593,18 @@ class AnalysisTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """分析任务视图集"""
     queryset = AnalysisTask.objects.all()
     serializer_class = AnalysisTaskSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        user = self.request.user
+        from django.db.models import Q as models_Q
+        from apps.projects.models import Project
+        accessible_projects = Project.objects.filter(
+            models_Q(owner=user) | models_Q(members=user)
+        ).distinct()
+        queryset = AnalysisTask.objects.filter(
+            document__project__in=accessible_projects
+        )
         document_id = self.request.query_params.get('document_id')
         if document_id:
             queryset = queryset.filter(document_id=document_id)
@@ -572,13 +623,13 @@ class AnalysisTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.views.decorators.csrf import csrf_exempt
 
 
 @csrf_exempt
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def upload_and_analyze(request):
     """上传文档并立即开始分析"""
     try:
@@ -672,7 +723,7 @@ def upload_and_analyze(request):
 
 @csrf_exempt
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def analyze_text(request):
     """直接分析文本内容"""
     try:
@@ -688,7 +739,7 @@ def analyze_text(request):
             title=title,
             document_type='txt',
             status='analyzing',
-            uploaded_by_id=1,  # 使用默认用户ID，或者从request.user获取
+            uploaded_by=request.user,
             project_id=project_id if project_id else None,
             extracted_text=description
         )
@@ -766,7 +817,7 @@ def analyze_text(request):
 
 @csrf_exempt
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def analyze_text(request):
     """分析手动输入的需求文本"""
     try:
@@ -783,7 +834,7 @@ def analyze_text(request):
             file=None,  # 手动输入没有文件
             document_type='txt',
             status='analyzing',
-            uploaded_by_id=1,  # 使用默认用户ID，或者从request.user获取
+            uploaded_by=request.user,
             project_id=project_id if project_id else None,
             extracted_text=description
         )
@@ -905,9 +956,13 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
     """AI模型配置视图集"""
     queryset = AIModelConfig.objects.all()
     serializer_class = AIModelConfigSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
+
+        # 仅返回当前用户创建的配置
+        queryset = queryset.filter(created_by=self.request.user)
 
         # 按模型类型过滤
         model_type = self.request.query_params.get('model_type')
@@ -1219,9 +1274,13 @@ class PromptConfigViewSet(viewsets.ModelViewSet):
     """提示词配置视图集"""
     queryset = PromptConfig.objects.all()
     serializer_class = PromptConfigSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
+
+        # 仅返回当前用户创建的提示词配置
+        queryset = queryset.filter(created_by=self.request.user)
 
         # 按提示词类型过滤
         prompt_type = self.request.query_params.get('prompt_type')
@@ -1370,6 +1429,7 @@ class GenerationConfigViewSet(viewsets.ModelViewSet):
     """生成行为配置视图集"""
     queryset = GenerationConfig.objects.all()
     serializer_class = GenerationConfigSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -1440,6 +1500,7 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
     """测试用例生成任务视图集"""
     queryset = TestCaseGenerationTask.objects.all()
     serializer_class = TestCaseGenerationTaskSerializer
+    permission_classes = [IsAuthenticated]
     pagination_class = TestCaseGenerationTaskPagination
     http_method_names = ['get', 'post', 'patch', 'delete']  # 允许GET、POST、PATCH和DELETE方法
     lookup_field = 'task_id'  # 使用task_id作为查找字段
@@ -1447,19 +1508,21 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        # 安全检查：确保request有query_params属性
         if not hasattr(self.request, 'query_params'):
             return queryset.order_by('-created_at')
 
-        # 按状态过滤
+        # 按创建者过滤：普通用户只能看到自己的任务，管理员可查看所有
+        user = self.request.user
+        if not user.is_staff:
+            queryset = queryset.filter(created_by=user)
+        else:
+            created_by = self.request.query_params.get('created_by')
+            if created_by:
+                queryset = queryset.filter(created_by_id=created_by)
+
         status_param = self.request.query_params.get('status')
         if status_param:
             queryset = queryset.filter(status=status_param)
-
-        # 按创建者过滤
-        created_by = self.request.query_params.get('created_by')
-        if created_by:
-            queryset = queryset.filter(created_by_id=created_by)
 
         return queryset.order_by('-created_at')
 
@@ -1721,22 +1784,28 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                                                             revised_cases = generated_cases
                                                         # 始终使用返回的完整内容，避免流式输出被截断导致数据丢失
                                                         # revised_cases 是完整的返回值，task.final_test_cases 只是流式回调的中间状态
+
+                                                        # 检测AI是否截断了输出（revised用例数远少于原始用例数）
+                                                        import re
+                                                        orig_count = len(set(regex.findall(r'\|\s*\*{0,2}([A-Z_]+_\d+)\*{0,2}\s*\|', generated_cases)))
+                                                        revised_count = len(set(regex.findall(r'\|\s*\*{0,2}([A-Z_]+_\d+)\*{0,2}\s*\|', revised_cases))) if revised_cases else 0
+                                                        if orig_count > 0 and revised_count < orig_count * 0.5:
+                                                            logger.warning(
+                                                                f"任务 {task.task_id} 改进阶段输出疑似截断 (原始: {orig_count}条, 改进: {revised_count}条)，使用原始用例")
+                                                            revised_cases = generated_cases
+
                                                         if revised_cases and len(revised_cases) > 0:
-                                                            # 检测并修复不完整的最后一条用例
                                                             revised_cases = AIModelService.fix_incomplete_last_case(
                                                                 revised_cases)
-
-                                                            # 按用例编号排序后再保存
                                                             sorted_cases = AIModelService.sort_test_cases_by_id(
                                                                 revised_cases)
-                                                            # 重新编号使编号连续
                                                             renumbered_cases = AIModelService.renumber_test_cases(
                                                                 sorted_cases)
                                                             task.final_test_cases = renumbered_cases
+                                                            task.save(update_fields=['final_test_cases'])
                                                             logger.info(
                                                                 f"任务 {task.task_id} 测试用例改进完成 (revised_cases长度: {len(revised_cases)}, 最终保存长度: {len(task.final_test_cases)})")
                                                         else:
-                                                            # 如果返回为空，保留流式回调保存的内容
                                                             logger.warning(
                                                                 f"任务 {task.task_id} 改进返回为空，使用流式回调保存的内容 (长度: {len(task.final_test_cases) if task.final_test_cases else 0})")
                                                     except Exception as revise_error:
@@ -1856,22 +1925,28 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                                                             revised_cases = generated_cases
                                                         # 始终使用返回的完整内容，避免流式输出被截断导致数据丢失
                                                         # revised_cases 是完整的返回值，task.final_test_cases 只是流式回调的中间状态
+
+                                                        # 检测AI是否截断了输出（revised用例数远少于原始用例数）
+                                                        import re
+                                                        orig_count = len(set(regex.findall(r'\|\s*\*{0,2}([A-Z_]+_\d+)\*{0,2}\s*\|', generated_cases)))
+                                                        revised_count = len(set(regex.findall(r'\|\s*\*{0,2}([A-Z_]+_\d+)\*{0,2}\s*\|', revised_cases))) if revised_cases else 0
+                                                        if orig_count > 0 and revised_count < orig_count * 0.5:
+                                                            logger.warning(
+                                                                f"任务 {task.task_id} 改进阶段输出疑似截断 (原始: {orig_count}条, 改进: {revised_count}条)，使用原始用例")
+                                                            revised_cases = generated_cases
+
                                                         if revised_cases and len(revised_cases) > 0:
-                                                            # 检测并修复不完整的最后一条用例
                                                             revised_cases = AIModelService.fix_incomplete_last_case(
                                                                 revised_cases)
-
-                                                            # 按用例编号排序后再保存
                                                             sorted_cases = AIModelService.sort_test_cases_by_id(
                                                                 revised_cases)
-                                                            # 重新编号使编号连续
                                                             renumbered_cases = AIModelService.renumber_test_cases(
                                                                 sorted_cases)
                                                             task.final_test_cases = renumbered_cases
+                                                            task.save(update_fields=['final_test_cases'])
                                                             logger.info(
                                                                 f"任务 {task.task_id} 测试用例改进完成 (revised_cases长度: {len(revised_cases)}, 最终保存长度: {len(task.final_test_cases)})")
                                                         else:
-                                                            # 如果返回为空，保留流式回调保存的内容
                                                             logger.warning(
                                                                 f"任务 {task.task_id} 改进返回为空，使用流式回调保存的内容 (长度: {len(task.final_test_cases) if task.final_test_cases else 0})")
                                                     except Exception as revise_error:
@@ -1996,16 +2071,27 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
         methods=['get'],
         url_path='stream_progress',
         renderer_classes=[PassThroughRenderer],
-        permission_classes=[]  # 允许访问，task_id本身就是安全标识
+        permission_classes=[]  # EventSource不支持自定义headers，通过query参数验证JWT
     )
     def stream_progress_sse(self, request, task_id=None):
         """
         SSE流式进度推送接口
         实时推送任务的流式输出和进度更新
         不使用DRF的Response，避免content negotiation问题
-        注意：EventSource不支持自定义headers，无法发送JWT token，所以允许通过session cookie访问
+        注意：EventSource不支持自定义headers，通过query参数token验证JWT身份
         """
         try:
+            # 从query参数中验证JWT token
+            token = request.query_params.get('token')
+            if token:
+                try:
+                    from rest_framework_simplejwt.authentication import JWTAuthentication
+                    validated = JWTAuthentication().get_validated_token(token)
+                    auth_user = JWTAuthentication().get_user(validated)
+                    request.user = auth_user
+                except Exception as e:
+                    logger.warning(f"SSE JWT验证失败: {e}")
+
             # 记录请求信息（用于调试）
             request_origin = request.META.get('HTTP_ORIGIN', 'unknown')
             logger.info(

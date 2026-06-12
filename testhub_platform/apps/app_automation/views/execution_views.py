@@ -13,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 import logging
 import os
 
-from ..models import AppTestExecution
+from ..models import AppTestExecution, AppProject
 from ..serializers import AppTestExecutionSerializer
 from ..tasks import send_execution_update
 from .test_case_views import AppPagination
@@ -32,7 +32,14 @@ class AppTestExecutionViewSet(viewsets.ModelViewSet):
     pagination_class = AppPagination
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        user = self.request.user
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=user) | Q(members=user)
+        ).distinct()
+        queryset = AppTestExecution.objects.filter(
+            Q(test_case__project__in=accessible_projects) |
+            Q(test_suite__project__in=accessible_projects)
+        ).distinct()
 
         # 支持 test_suite__isnull 过滤，用于区分单独执行和套件执行
         suite_isnull = self.request.query_params.get('test_suite__isnull')
@@ -119,7 +126,19 @@ class AppTestExecutionViewSet(viewsets.ModelViewSet):
 def serve_report_file(request, execution_id, file_path=''):
     """提供 Allure 报告文件访问"""
     try:
+        if not request.user.is_authenticated:
+            raise Http404("未授权访问")
+
         execution = AppTestExecution.objects.get(id=execution_id)
+
+        # 校验用户是否有权访问该执行记录所属项目
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=request.user) | Q(members=request.user)
+        ).distinct()
+        project = getattr(execution.test_case, 'project', None)
+        if project and project not in accessible_projects:
+            raise Http404("报告不存在")
+
         if not execution.report_path:
             raise Http404("报告路径不存在")
 

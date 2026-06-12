@@ -9,8 +9,9 @@ from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import logging
 
-from ..models import AppPackage, AppTestCase, AppDevice, AppTestExecution
+from ..models import AppPackage, AppTestCase, AppDevice, AppTestExecution, AppProject
 from ..serializers import AppPackageSerializer, AppTestCaseSerializer, AppTestExecutionSerializer
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,10 @@ class AppPackageViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = AppPagination
     search_fields = ['name', 'package_name']
-    
+
+    def get_queryset(self):
+        return AppPackage.objects.filter(created_by=self.request.user)
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
@@ -43,7 +47,14 @@ class AppTestCaseViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = ['project', 'app_package']
     search_fields = ['name']
-    
+
+    def get_queryset(self):
+        user = self.request.user
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=user) | Q(members=user)
+        ).distinct()
+        return AppTestCase.objects.filter(project__in=accessible_projects)
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
     

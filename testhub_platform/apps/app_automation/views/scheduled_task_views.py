@@ -8,12 +8,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Q
 from django.utils import timezone
 
 from .test_case_views import AppPagination
 from ..models import (
     AppScheduledTask, AppNotificationLog,
     AppTestSuite, AppTestCase, AppDevice,
+    AppProject,
 )
 from ..serializers import (
     AppScheduledTaskSerializer,
@@ -34,6 +36,13 @@ class AppScheduledTaskViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'description']
     ordering_fields = ['created_at', 'next_run_time', 'last_run_time']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=user) | Q(members=user)
+        ).distinct()
+        return AppScheduledTask.objects.filter(project__in=accessible_projects)
 
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
@@ -162,6 +171,13 @@ class AppNotificationLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['task_name', 'notification_content']
     ordering_fields = ['created_at', 'sent_at']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        accessible_projects = AppProject.objects.filter(
+            Q(owner=user) | Q(members=user)
+        ).distinct()
+        return AppNotificationLog.objects.filter(task__project__in=accessible_projects)
 
     @action(detail=True, methods=['post'])
     def retry(self, request, pk=None):

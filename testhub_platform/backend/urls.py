@@ -4,6 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.decorators.csrf import csrf_exempt
 from django.views.static import serve
+from django.http import HttpResponseForbidden
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -41,17 +42,18 @@ if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_FILES_URL, document_root=settings.STATIC_FILES_ROOT)
 
-# APP自动化 Template 目录静态访问
-import os
-urlpatterns += [
-    path('app-automation-templates/<path:path>', 
-         serve, 
-         {'document_root': os.path.join(settings.BASE_DIR, 'apps', 'app_automation', 'Template')}),
-]
+# APP自动化 Template 目录静态访问（仅DEBUG模式）
+if settings.DEBUG:
+    import os
+    urlpatterns += [
+        path('app-automation-templates/<path:path>',
+             serve,
+             {'document_root': os.path.join(settings.BASE_DIR, 'apps', 'app_automation', 'Template')}),
+    ]
 
-# APP自动化 Allure 报告访问
-urlpatterns += [
-    path('app-automation-reports/<path:path>', 
-         serve, 
-         {'document_root': os.path.join(settings.MEDIA_ROOT, 'app-automation', 'allure-reports')}),
-]
+    # APP自动化 Allure 报告访问
+    urlpatterns += [
+        path('app-automation-reports/<path:path>',
+             serve,
+             {'document_root': os.path.join(settings.MEDIA_ROOT, 'app-automation', 'allure-reports')}),
+    ]

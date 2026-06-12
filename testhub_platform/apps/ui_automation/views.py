@@ -1934,7 +1934,7 @@ class TestCaseStepViewSet(viewsets.ModelViewSet):
             models.Q(owner=user) | models.Q(members=user)
         ).distinct()
         accessible_test_cases = TestCase.objects.filter(project__in=accessible_projects)
-        return TestCaseStep.objects.filter(test_case__in=accessible_projects)
+        return TestCaseStep.objects.filter(test_case__in=accessible_test_cases)
 
 
 class TestCaseExecutionViewSet(viewsets.ModelViewSet):
@@ -2012,13 +2012,15 @@ class OperationRecordViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ['operation_type', 'resource_type', 'user']
 
     def get_queryset(self):
-        # 返回最近的操作记录，按创建时间倒序
-        # 过滤掉AI智能模式相关的操作记录
+        # 只返回当前用户的操作记录（管理员可查看所有）
+        user = self.request.user
         queryset = OperationRecord.objects.exclude(
             resource_type__in=['ai_case', 'ai_execution']
         ).order_by('-created_at')
 
-        # 支持通过查询参数限制返回数量
+        if not user.is_staff:
+            queryset = queryset.filter(user=user)
+
         limit = self.request.query_params.get('limit', None)
         if limit:
             try:
@@ -2895,6 +2897,15 @@ class UiNotificationLogViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['created_at', 'sent_at']
     ordering = ['-created_at']
 
+    def get_queryset(self):
+        user = self.request.user
+        accessible_projects = UiProject.objects.filter(
+            models.Q(owner=user) | models.Q(members=user)
+        ).distinct()
+        return UiNotificationLog.objects.filter(
+            task__project__in=accessible_projects
+        ).distinct().order_by('-created_at')
+
     @action(detail=True, methods=['post'])
     def retry(self, request, pk=None):
         """重试发送通知"""
@@ -2912,6 +2923,15 @@ class UiTaskNotificationSettingViewSet(viewsets.ModelViewSet):
     """UI任务通知设置视图集"""
     queryset = UiTaskNotificationSetting.objects.all()
     serializer_class = UiTaskNotificationSettingSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        accessible_projects = UiProject.objects.filter(
+            models.Q(owner=user) | models.Q(members=user)
+        ).distinct()
+        return UiTaskNotificationSetting.objects.filter(
+            task__project__in=accessible_projects
+        ).distinct()
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['task', 'is_enabled', 'notification_type']

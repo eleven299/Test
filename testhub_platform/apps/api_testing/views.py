@@ -80,7 +80,7 @@ class ApiProjectViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """创建项目时记录日志"""
-        instance = serializer.save()
+        instance = serializer.save(owner=self.request.user)
         log_operation(
             operation_type='create',
             resource_type='project',
@@ -318,7 +318,7 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """创建接口时记录日志"""
-        instance = serializer.save()
+        instance = serializer.save(created_by=self.request.user)
         log_operation(
             operation_type='create',
             resource_type='request',
@@ -593,7 +593,7 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """创建环境时记录日志"""
-        instance = serializer.save()
+        instance = serializer.save(created_by=self.request.user)
         log_operation(
             operation_type='create',
             resource_type='environment',
@@ -872,7 +872,7 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """创建测试套件时记录日志"""
-        instance = serializer.save()
+        instance = serializer.save(created_by=self.request.user)
         log_operation(
             operation_type='create',
             resource_type='suite',
@@ -1551,12 +1551,32 @@ class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    """用户列表接口，用于项目成员选择"""
+    """用户列表接口，仅返回与当前用户有共同项目的用户"""
     queryset = User.objects.all().order_by('username')
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter]
     search_fields = ['username', 'email', 'first_name', 'last_name']
+
+    def get_queryset(self):
+        from apps.projects.models import Project
+        from django.db.models import Q as models_Q
+        user = self.request.user
+        # 从用户可访问的项目中找出所有关联用户
+        project_user_ids = Project.objects.filter(
+            models_Q(owner=user) | models_Q(members=user)
+        ).distinct().values_list('owner_id', 'members__id')
+
+        all_user_ids = set()
+        for owner_id, member_id in project_user_ids:
+            if owner_id:
+                all_user_ids.add(owner_id)
+            if member_id:
+                all_user_ids.add(member_id)
+        # 至少包含自己
+        all_user_ids.add(user.id)
+
+        return User.objects.filter(id__in=all_user_ids).order_by('username')
 
 
 class ScheduledTaskViewSet(viewsets.ModelViewSet):
@@ -2344,10 +2364,11 @@ class OperationLogViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
-        """只返回当前用户相关的操作日志"""
+        """只返回当前用户自己的操作日志（管理员可查看所有）"""
         user = self.request.user
-        # 可以根据需要调整权限逻辑，这里返回所有日志
-        return OperationLog.objects.all().order_by('-created_at')
+        if user.is_staff:
+            return OperationLog.objects.all().order_by('-created_at')
+        return OperationLog.objects.filter(user=user).order_by('-created_at')
 
 
 class ApiDashboardViewSet(viewsets.ViewSet):
