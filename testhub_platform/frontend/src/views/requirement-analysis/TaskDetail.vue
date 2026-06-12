@@ -57,6 +57,18 @@
       <p>{{ $t('taskDetail.loading') }}</p>
     </div>
 
+    <div v-else-if="isGenerating" class="generating-state">
+      <div class="progress-card">
+        <h3>{{ $t('taskDetail.generatingTitle') }}</h3>
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar" :style="{ width: task.progress + '%' }"></div>
+        </div>
+        <p class="progress-text">{{ task.progress || 0 }}%</p>
+        <p class="status-text">{{ getStatusText(task.status) }}</p>
+        <p v-if="task.error_message" class="error-text">{{ task.error_message }}</p>
+      </div>
+    </div>
+
     <div v-else-if="!task.task_id" class="error-state">
       <h3>{{ $t('taskDetail.taskNotExist') }}</h3>
       <router-link to="/ai-generation/generated-testcases">{{ $t('taskDetail.backToList') }}</router-link>
@@ -283,6 +295,7 @@ export default {
       currentPage: 1,
       pageSize: 10,
       isExporting: false,
+      pollTimer: null,
       // 编辑相关状态
       isEditing: false,
       isSaving: false,
@@ -318,12 +331,20 @@ export default {
 
     paginationEnd() {
       return Math.min(this.currentPage * this.pageSize, this.testCases.length)
+    },
+
+    isGenerating() {
+      return ['pending', 'generating', 'reviewing', 'revising'].includes(this.task.status)
     }
   },
 
   mounted() {
     this.taskId = this.$route.params.taskId
     this.loadTaskDetail()
+  },
+
+  beforeUnmount() {
+    this.stopPolling()
   },
 
   methods: {
@@ -352,19 +373,55 @@ export default {
 
     async loadTaskDetail() {
       try {
-        // 获取任务基本信息
         const taskResponse = await api.get(`/requirement-analysis/testcase-generation/${this.taskId}/`)
         this.task = taskResponse.data
 
-        // 解析最终测试用例
         if (this.task.final_test_cases) {
           this.testCases = this.parseTestCases(this.task.final_test_cases)
+        }
+
+        // 如果任务还在进行中，启动轮询
+        if (this.isGenerating) {
+          this.isLoading = false
+          this.startPolling()
+        } else {
+          this.isLoading = false
         }
       } catch (error) {
         console.error('Failed to load task details:', error)
         ElMessage.error(this.$t('taskDetail.loadFailed'))
-      } finally {
         this.isLoading = false
+      }
+    },
+
+    startPolling() {
+      this.stopPolling()
+      this.pollTimer = setInterval(() => {
+        this.pollProgress()
+      }, 3000)
+    },
+
+    stopPolling() {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer)
+        this.pollTimer = null
+      }
+    },
+
+    async pollProgress() {
+      try {
+        const response = await api.get(`/requirement-analysis/testcase-generation/${this.taskId}/`)
+        this.task = response.data
+
+        if (!this.isGenerating) {
+          this.stopPolling()
+          // 任务完成，加载最终结果
+          if (this.task.final_test_cases) {
+            this.testCases = this.parseTestCases(this.task.final_test_cases)
+          }
+        }
+      } catch (error) {
+        console.error('Poll progress failed:', error)
       }
     },
 
@@ -1251,13 +1308,19 @@ export default {
 .testcases-table {
   background: white;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 表格内层容器 - 保证列宽不被挤压 */
+.table-scroll-inner {
+  min-width: 1200px;
 }
 
 .table-header {
   display: grid;
-  grid-template-columns: 60px 120px 1fr 1fr 1fr 1fr 80px 150px;
+  grid-template-columns: 60px 100px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(200px, 1.5fr) minmax(200px, 1.5fr) 80px 150px;
   background: #f8f9fa;
   font-weight: bold;
   color: #2c3e50;
@@ -1265,7 +1328,7 @@ export default {
 
 .table-body .table-row {
   display: grid;
-  grid-template-columns: 60px 120px 1fr 1fr 1fr 1fr 80px 150px;
+  grid-template-columns: 60px 100px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(200px, 1.5fr) minmax(200px, 1.5fr) 80px 150px;
   border-bottom: 1px solid #eee;
   transition: background 0.2s ease;
 }
@@ -1277,22 +1340,65 @@ export default {
 .header-cell, .body-cell {
   padding: 16px 8px;
   display: flex;
-  align-items: flex-start; /* 改为顶部对齐，避免内容被裁剪 */
+  align-items: flex-start;
   border-right: 1px solid #eee;
   word-break: break-word;
   min-height: 60px;
 }
 
-/* 文本截断样式 */
+/* 内容列可垂直滚动 */
 .text-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  max-height: 120px;
+  overflow-y: auto;
   white-space: pre-wrap;
   line-height: 1.6;
   word-break: break-word;
+}
+
+/* 滚动条样式 */
+.testcases-table::-webkit-scrollbar,
+.text-truncate::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.testcases-table::-webkit-scrollbar-thumb,
+.text-truncate::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+
+.testcases-table::-webkit-scrollbar-track,
+.text-truncate::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 可滚动单元格 - 保留用于操作步骤/预期结果 */
+.scrollable-cell {
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.cell-content {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 16px 8px;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.cell-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.cell-content::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 2px;
+}
+
+.cell-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .checkbox-cell {
@@ -1508,6 +1614,54 @@ export default {
   padding: 15px;
   border-radius: 6px;
   border-left: 4px solid #3498db;
+}
+
+.generating-state {
+  text-align: center;
+  padding: 60px 20px;
+
+  .progress-card {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 40px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+
+    h3 { color: #2c3e50; margin-bottom: 24px; }
+
+    .progress-bar-wrapper {
+      height: 8px;
+      background: #e9ecef;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #409eff, #66b1ff);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      font-size: 24px;
+      font-weight: 600;
+      color: #409eff;
+      margin-bottom: 8px;
+    }
+
+    .status-text { color: #666; font-size: 14px; }
+
+    .error-text {
+      color: #f56c6c;
+      margin-top: 12px;
+      padding: 12px;
+      background: #fef0f0;
+      border-radius: 6px;
+    }
+  }
 }
 
 .loading-state, .error-state, .empty-state {

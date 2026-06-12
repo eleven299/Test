@@ -10,6 +10,7 @@ export default {
     newCase: '新建用例',
     batchDelete: '批量删除',
     exportExcel: '导出Excel',
+    exportXMind: '导出XMind',
     downloadImportTemplate: '下载导入模板',
     importCases: '导入用例',
     importRecords: '导入记录',
@@ -154,6 +155,8 @@ export default {
     excelCreatedAt: '创建时间',
     excelSheetName: '测试用例',
     excelFileName: '测试用例_{date}.xlsx',
+    xmindFileName: '测试用例_{date}',
+    xmindTitle: '测试用例',
     importStatusMap: {
       pending: '等待中',
       importing: '导入中',

@@ -10,6 +10,7 @@ export default {
     newCase: 'New Case',
     batchDelete: 'Batch Delete',
     exportExcel: 'Export Excel',
+    exportXMind: 'Export XMind',
     downloadImportTemplate: 'Download Import Template',
     importCases: 'Import Cases',
     importRecords: 'Import Records',
@@ -154,6 +155,8 @@ export default {
     excelCreatedAt: 'Created At',
     excelSheetName: 'Test Cases',
     excelFileName: 'TestCases_{date}.xlsx',
+    xmindFileName: 'TestCases_{date}',
+    xmindTitle: 'Test Cases',
     importStatusMap: {
       pending: 'Pending',
       importing: 'Importing',

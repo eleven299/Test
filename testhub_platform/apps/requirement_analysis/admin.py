@@ -93,7 +93,23 @@ class GenerationConfigAdmin(admin.ModelAdmin):
 
 @admin.register(TestCaseGenerationTask)
 class TestCaseGenerationTaskAdmin(admin.ModelAdmin):
-    list_display = ['task_id', 'title', 'status', 'progress', 'output_mode', 'created_at']
+    list_display = ['task_id', 'title', 'status', 'progress', 'testcase_count', 'output_mode', 'created_at']
     list_filter = ['status', 'output_mode', 'created_at']
     search_fields = ['task_id', 'title', 'requirement_text']
     readonly_fields = ['task_id', 'created_at', 'updated_at']
+
+    def testcase_count(self, obj):
+        """统计最终测试用例数量（按表格行数，与前端一致）"""
+        content = obj.final_test_cases or obj.generated_test_cases or ''
+        lines = content.split('\n')
+        count = 0
+        for line in lines:
+            s = line.strip()
+            # 表格数据行：以|开头，不含分隔线---
+            if s.startswith('|') and '---' not in s:
+                count += 1
+        # 减去表头行（含"用例ID"）
+        if count > 0:
+            count -= 1
+        return max(count, 0)
+    testcase_count.short_description = '用例数'

@@ -7,6 +7,7 @@ import sys
 import subprocess
 import glob
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -218,30 +219,91 @@ class AppTestExecutor:
         
         return base_dir
     
+    def _get_previous_report_history(self, execution_id: Optional[int]) -> Optional[str]:
+        """
+        获取同一测试套件上一次成功报告的 history 目录路径
+
+        用于在生成新报告前复制历史数据，保持趋势图连续性。
+
+        Args:
+            execution_id: 当前执行记录ID
+
+        Returns:
+            上一个报告的 history 目录路径，若无则返回 None
+        """
+        if not execution_id:
+            return None
+
+        try:
+            from apps.app_automation.models import AppTestExecution
+
+            current = AppTestExecution.objects.filter(id=execution_id).first()
+            if not current or not current.test_suite:
+                return None
+
+            # 查找同一套件下、在当前执行之前、且有报告路径的执行记录
+            prev = (
+                AppTestExecution.objects.filter(
+                    test_suite=current.test_suite,
+                    finished_at__lt=current.started_at or current.created_at,
+                    report_path__gt='',  # 有报告路径
+                )
+                .exclude(id=execution_id)
+                .order_by('-finished_at')
+                .first()
+            )
+
+            if prev and os.path.isdir(prev.report_path):
+                history_dir = os.path.join(prev.report_path, 'history')
+                if os.path.isdir(history_dir):
+                    logger.info(f"找到上一次报告的历史数据: {history_dir}")
+                    return history_dir
+                else:
+                    logger.info(f"上一次报告 ({prev.id}) 无 history 目录")
+            else:
+                logger.info(f"未找到该套件之前的成功报告")
+
+            return None
+        except Exception as e:
+            logger.warning(f"获取上一次报告历史失败: {e}")
+            return None
+
     def _generate_allure_report(self, execution_id: Optional[int] = None) -> Optional[str]:
         """
         生成 Allure 报告
-        
+
         Args:
             execution_id: 执行记录ID
-            
+
         Returns:
             报告目录路径，失败返回 None
         """
         try:
             allure_results_dir = self._get_allure_results_dir(execution_id)
             report_dir = self._get_allure_report_dir(execution_id)
-            
+
             # 确保目录存在
             os.makedirs(report_dir, exist_ok=True)
-            
+
+            # 将上一次成功报告的历史数据复制到 allure-results 中，
+            # 这样 Allure 会生成包含多运行历史数据的趋势图
+            prev_history = self._get_previous_report_history(execution_id)
+            if prev_history:
+                try:
+                    target_history = os.path.join(allure_results_dir, 'history')
+                    if not os.path.exists(target_history):
+                        shutil.copytree(prev_history, target_history)
+                        logger.info(f"已将历史数据从 {prev_history} 复制到 {target_history}")
+                except Exception as e:
+                    logger.warning(f"复制历史数据失败: {e}，将继续生成报告（无历史趋势）")
+
             # 查找 allure 命令
             allure_path = self._find_allure_command()
-            
+
             if not allure_path:
                 logger.warning("未找到 Allure 命令，跳过报告生成")
                 return None
-            
+
             # 生成报告
             cmd = [allure_path, 'generate', allure_results_dir, '-o', report_dir, '--clean']
             

@@ -1068,8 +1068,14 @@ class AIModelService:
 
         # 识别用例块：每个用例从包含编号的行开始
         # 支持多种编号格式：TC-001, TC001, TEST-001, 测试用例1, 1. 等
-        case_pattern = re.compile(r'^(#{1,6}\s+)?(?:TC[-_]?\d+|TEST[-_]?\d+|测试用例\d+|\d+[\.\、]\s*[:：]?\s*\S+)',
-                                  re.IGNORECASE | re.MULTILINE)
+        case_pattern = re.compile(
+            r'^(#{1,6}\s+)?'  # 可选标题
+            r'(?:'
+            r'\|\s*\*{0,2}[A-Z_]+[-_]?\d+\*{0,2}\s*\|'  # 表格格式: | COUPON_001 | 或 | **LOGIN_009** |
+            r'|(?:TC[-_]?\d+|TEST[-_]?\d+|测试用例\d+)'  # 文本格式
+            r'|\d+[\.\、]\s*[:：]?\s*\S+'  # 数字开头: 1. xxx
+            r')',
+            re.IGNORECASE)
 
         # 找到所有用例块的起始位置
         case_starts = []
@@ -1099,8 +1105,11 @@ class AIModelService:
         # 提取编号用于排序
         def extract_case_id(block):
             first_line = block['first_line']
-            # 尝试匹配各种编号格式
-            # TC-001, TC001, TEST-001, 测试用例1, 1. xxx 等
+            # 表格格式: | COUPON_001 | 或 | **LOGIN_009** | -> 提取数字
+            table_match = re.match(r'\|\s*\*{0,2}[A-Z_]+[-_]?(\d+)\*{0,2}\s*\|', first_line, re.IGNORECASE)
+            if table_match:
+                return int(table_match.group(1))
+            # 文本格式: TC-001, TEST-001, 测试用例1, 1. xxx 等
             match = re.search(r'(?:TC[-_]?|TEST[-_]?|测试用例)?(\d+)', first_line, re.IGNORECASE)
             if match:
                 return int(match.group(1))
@@ -1227,13 +1236,13 @@ class AIModelService:
         # 获取第一列的编号（例如：IMMSG001）
         first_id = parts[1].strip()
 
-        # 提取编号格式前缀（例如：IMMSG）
-        id_match = re.match(r'^([A-Z]+)(\d+)$', first_id)
+        # 提取编号格式前缀（例如：IMMSG, COUPON_）
+        id_match = re.match(r'^\*{0,2}([A-Z]+[_]?)(\d+)\*{0,2}$', first_id)
         if not id_match:
             logger.warning(f"无法识别编号格式: {first_id}")
             return test_cases_content
 
-        prefix = id_match.group(1)  # 例如：IMMSG
+        prefix = id_match.group(1)  # 例如：IMMSG, COUPON_
         total_cases = 0
 
         # 重新编号所有数据行

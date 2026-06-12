@@ -794,12 +794,13 @@ export default {
       // 在生产环境中(如Docker部署)，通常通过Nginx反向代理访问，端口应该是80或443(与当前页面一致)
       // 而不是直接访问后端端口8000
       const currentOrigin = window.location.origin
-      const apiUrl = `${currentOrigin}/api/requirement-analysis/testcase-generation/${this.currentTaskId}/stream_progress/`
+      const token = localStorage.getItem('access_token') || ''
+      const apiUrl = `${currentOrigin}/api/requirement-analysis/testcase-generation/${this.currentTaskId}/stream_progress/?token=${encodeURIComponent(token)}`
 
       console.log('SSE连接URL:', apiUrl)
 
-      // 创建EventSource（不支持自定义headers，使用withCredentials发送cookie）
-      this.eventSource = new EventSource(apiUrl, { withCredentials: true })
+      // 创建EventSource（通过query参数传递JWT token，不再依赖session cookie）
+      this.eventSource = new EventSource(apiUrl)
 
       // 监听连接打开事件
       this.eventSource.onopen = (event) => {

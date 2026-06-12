@@ -692,19 +692,12 @@ export default {
     },
 
     viewTaskDetail(task) {
-      if (['pending', 'generating', 'reviewing'].includes(task.status)) {
-        ElMessage.info(this.$t('generatedTestCases.generatingWait'))
-        return
-      }
-      
-      if (task.status === 'completed') {
-        // 在新标签页打开任务详情
-        const url = this.$router.resolve({
-          name: 'TaskDetail',
-          params: { taskId: task.task_id }
-        }).href
-        window.open(url, '_blank')
-      }
+      // 任何状态都可以查看详情
+      const url = this.$router.resolve({
+        name: 'TaskDetail',
+        params: { taskId: task.task_id }
+      }).href
+      window.open(url, '_blank')
     },
 
     async batchAdoptTask(task) {

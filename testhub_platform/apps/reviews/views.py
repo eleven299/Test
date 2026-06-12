@@ -6,39 +6,50 @@ from django.db.models import Q
 from .models import TestCaseReview, ReviewAssignment, TestCaseReviewComment, ReviewTemplate
 from .serializers import (
     TestCaseReviewSerializer, TestCaseReviewCreateSerializer,
-    ReviewAssignmentSerializer, TestCaseReviewCommentSerializer, 
+    ReviewAssignmentSerializer, TestCaseReviewCommentSerializer,
     TestCaseReviewCommentCreateSerializer,
     ReviewTemplateSerializer, ReviewTemplateCreateSerializer
 )
 from apps.testcases.models import TestCase
 from apps.users.models import User
+from apps.projects.models import Project
+
+
+def _get_accessible_projects(user):
+    return Project.objects.filter(
+        Q(owner=user) | Q(members=user)
+    ).distinct()
 
 
 class TestCaseReviewViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return TestCaseReviewCreateSerializer
         return TestCaseReviewSerializer
-    
+
     def get_queryset(self):
-        queryset = TestCaseReview.objects.select_related('creator').prefetch_related(
+        # 默认只返回用户可访问项目的评审
+        accessible_projects = _get_accessible_projects(self.request.user)
+        queryset = TestCaseReview.objects.filter(
+            projects__in=accessible_projects
+        ).select_related('creator').prefetch_related(
             'projects', 'testcases', 'reviewers', 'comments', 'reviewassignment_set__reviewer'
-        )
-        
+        ).distinct()
+
         # 过滤参数
         project_id = self.request.query_params.get('project', None)
         status_param = self.request.query_params.get('status', None)
         reviewer_id = self.request.query_params.get('reviewer', None)
-        
+
         if project_id:
             queryset = queryset.filter(projects__id=project_id)
         if status_param:
             queryset = queryset.filter(status=status_param)
         if reviewer_id:
             queryset = queryset.filter(reviewers__id=reviewer_id)
-            
+
         return queryset
     
     def perform_create(self, serializer):
@@ -128,16 +139,20 @@ class TestCaseReviewCommentViewSet(viewsets.ModelViewSet):
         return TestCaseReviewCommentSerializer
     
     def get_queryset(self):
+        # 只返回用户可访问项目中的评论
+        accessible_projects = _get_accessible_projects(self.request.user)
         review_id = self.request.query_params.get('review', None)
         testcase_id = self.request.query_params.get('testcase', None)
-        
-        queryset = TestCaseReviewComment.objects.select_related('author', 'testcase', 'review')
-        
+
+        queryset = TestCaseReviewComment.objects.filter(
+            review__projects__in=accessible_projects
+        ).select_related('author', 'testcase', 'review').distinct()
+
         if review_id:
             queryset = queryset.filter(review_id=review_id)
         if testcase_id:
             queryset = queryset.filter(testcase_id=testcase_id)
-            
+
         return queryset
     
     def perform_create(self, serializer):
@@ -153,12 +168,16 @@ class ReviewTemplateViewSet(viewsets.ModelViewSet):
         return ReviewTemplateSerializer
     
     def get_queryset(self):
+        # 只返回用户可访问项目中的模板
+        accessible_projects = _get_accessible_projects(self.request.user)
         project_id = self.request.query_params.get('project', None)
-        queryset = ReviewTemplate.objects.select_related('creator').prefetch_related('project', 'default_reviewers')
-        
+        queryset = ReviewTemplate.objects.filter(
+            project__in=accessible_projects
+        ).select_related('creator').prefetch_related('project', 'default_reviewers').distinct()
+
         if project_id:
             queryset = queryset.filter(project__id=project_id)
-            
+
         return queryset.filter(is_active=True)
     
     def perform_create(self, serializer):

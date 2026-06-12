@@ -21,60 +21,6 @@
           />
         </el-form-item>
 
-        <el-form-item prop="phone">
-          <el-input
-            v-model="form.phone"
-            placeholder="请输入手机号"
-            size="large"
-            :prefix-icon="Phone"
-            maxlength="11"
-          />
-        </el-form-item>
-
-        <!-- 图形验证码 -->
-        <el-row :gutter="12">
-          <el-col :span="14">
-            <el-form-item prop="captcha_code">
-              <el-input
-                v-model="form.captcha_code"
-                placeholder="图形验证码"
-                size="large"
-                maxlength="4"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="10">
-            <img
-              :src="captchaImage"
-              alt="验证码"
-              class="captcha-img"
-              @click="refreshCaptcha"
-              title="点击刷新验证码"
-            />
-          </el-col>
-        </el-row>
-
-        <!-- 短信验证码 -->
-        <el-form-item prop="verify_code">
-          <el-input
-            v-model="form.verify_code"
-            placeholder="短信验证码"
-            size="large"
-            maxlength="6"
-          >
-            <template #append>
-              <el-button
-                :disabled="smsCountdown > 0 || !form.phone || !form.captcha_code"
-                :loading="sendingSms"
-                @click="sendVerifyCode"
-                style="min-width: 110px"
-              >
-                {{ smsCountdown > 0 ? `${smsCountdown}s后重试` : '发送验证码' }}
-              </el-button>
-            </template>
-          </el-input>
-        </el-form-item>
-
         <el-form-item prop="email">
           <el-input
             v-model="form.email"
@@ -128,27 +74,6 @@
           />
         </el-form-item>
 
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item prop="department">
-              <el-input
-                v-model="form.department"
-                :placeholder="$t('auth.department')"
-                size="large"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item prop="position">
-              <el-input
-                v-model="form.position"
-                :placeholder="$t('auth.position')"
-                size="large"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
         <el-form-item>
           <el-button
             type="primary"
@@ -174,59 +99,41 @@ import { ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { User, Lock, Message, Phone } from '@element-plus/icons-vue'
+import { User, Lock, Message } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
-import api from '@/utils/api'
 
 const router = useRouter()
 const userStore = useUserStore()
 const { t } = useI18n()
 const formRef = ref()
 const loading = ref(false)
-const sendingSms = ref(false)
-const smsCountdown = ref(0)
-const captchaImage = ref('')
-const captchaToken = ref('')
-let countdownTimer = null
 
 const form = reactive({
   username: '',
-  phone: '',
-  captcha_code: '',
-  verify_code: '',
-  verify_code_token: '',
   email: '',
   first_name: '',
   last_name: '',
   password: '',
-  password_confirm: '',
-  department: '',
-  position: ''
+  password_confirm: ''
 })
-
-const validatePhone = (rule, value, callback) => {
-  if (!value) {
-    callback(new Error('请输入手机号'))
-  } else if (!/^1[3-9]\d{9}$/.test(value)) {
-    callback(new Error('手机号格式不正确'))
-  } else {
-    callback()
-  }
-}
 
 const rules = {
   username: [
-    { required: true, message: computed(() => t('auth.usernameRequired')), trigger: 'blur' },
-    { min: 3, max: 20, message: computed(() => t('auth.usernameLength')), trigger: 'blur' }
-  ],
-  phone: [
-    { required: true, validator: validatePhone, trigger: 'blur' }
-  ],
-  captcha_code: [
-    { required: true, message: '请输入图形验证码', trigger: 'blur' }
-  ],
-  verify_code: [
-    { required: true, message: '请输入短信验证码', trigger: 'blur' }
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (!/^[a-zA-Z0-9]+$/.test(value)) {
+          callback(new Error('用户名只能包含英文字母和数字'))
+        } else if (value.length > 10) {
+          callback(new Error('用户名不能超过10位'))
+        } else if (value.length < 3) {
+          callback(new Error('用户名至少3位'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
   ],
   email: [
     { required: true, message: computed(() => t('auth.emailRequired')), trigger: 'blur' },
@@ -251,58 +158,6 @@ const rules = {
   ]
 }
 
-// 获取图形验证码
-const refreshCaptcha = async () => {
-  try {
-    const response = await api.get('/auth/captcha/')
-    captchaImage.value = response.data.image
-    captchaToken.value = response.data.token
-    form.captcha_code = ''
-  } catch (error) {
-    ElMessage.error('获取验证码失败，请刷新重试')
-  }
-}
-
-// 发送短信验证码
-const sendVerifyCode = async () => {
-  if (!form.phone) {
-    ElMessage.warning('请先输入手机号')
-    return
-  }
-  if (!form.captcha_code) {
-    ElMessage.warning('请先输入图形验证码')
-    return
-  }
-
-  sendingSms.value = true
-  try {
-    const response = await api.post('/auth/send-register-code/', {
-      phone: form.phone,
-      captcha_token: captchaToken.value,
-      captcha_code: form.captcha_code,
-      mode: 'register'
-    })
-    ElMessage.success('验证码已发送')
-    form.verify_code_token = response.data.verify_code_token
-    // 开始 60 秒倒计时
-    smsCountdown.value = 60
-    countdownTimer = setInterval(() => {
-      smsCountdown.value--
-      if (smsCountdown.value <= 0) {
-        clearInterval(countdownTimer)
-        countdownTimer = null
-      }
-    }, 1000)
-  } catch (error) {
-    const errMsg = error.response?.data?.error || '验证码发送失败'
-    ElMessage.error(errMsg)
-    // 刷新图形验证码
-    refreshCaptcha()
-  } finally {
-    sendingSms.value = false
-  }
-}
-
 const handleRegister = async () => {
   if (!formRef.value) return
 
@@ -315,16 +170,12 @@ const handleRegister = async () => {
         router.replace('/home')
       } catch (error) {
         ElMessage.error(error.response?.data?.error || t('auth.registerFailed'))
-        refreshCaptcha()
       } finally {
         loading.value = false
       }
     }
   })
 }
-
-// 页面加载时获取图形验证码
-refreshCaptcha()
 </script>
 
 <style lang="scss" scoped>
@@ -358,14 +209,6 @@ refreshCaptcha()
       color: #909399;
       margin: 0;
     }
-  }
-
-  .captcha-img {
-    width: 100%;
-    height: 40px;
-    border-radius: 4px;
-    cursor: pointer;
-    border: 1px solid #dcdfe6;
   }
 
   .form-footer {

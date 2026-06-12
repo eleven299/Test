@@ -31,14 +31,23 @@ class ProjectListCreateView(generics.ListCreateAPIView):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def get_all_projects(request):
-    """获取所有项目列表，用于下拉选择等场景"""
-    projects = Project.objects.all().values('id', 'name', 'description', 'status')
+    """获取用户可访问的项目列表，用于下拉选择等场景"""
+    from django.db import models as db_models
+    projects = Project.objects.filter(
+        db_models.Q(owner=request.user) | db_models.Q(members=request.user)
+    ).distinct().values('id', 'name', 'description', 'status')
     return Response(list(projects))
 
 class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        return Project.objects.filter(
+            models.Q(owner=user) | models.Q(members=user)
+        ).distinct()
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
@@ -113,11 +122,22 @@ def remove_project_member(request, project_id, member_id):
 class ProjectEnvironmentListCreateView(generics.ListCreateAPIView):
     serializer_class = ProjectEnvironmentSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_queryset(self):
         project_id = self.kwargs['project_id']
+        # 校验用户有权限访问该项目
+        if not Project.objects.filter(
+            models.Q(owner=self.request.user) | models.Q(members=self.request.user)
+        ).filter(id=project_id).exists():
+            from django.http import Http404
+            raise Http404('项目不存在')
         return ProjectEnvironment.objects.filter(project_id=project_id)
-    
+
     def perform_create(self, serializer):
         project_id = self.kwargs['project_id']
+        if not Project.objects.filter(
+            models.Q(owner=self.request.user) | models.Q(members=self.request.user)
+        ).filter(id=project_id).exists():
+            from django.http import Http404
+            raise Http404('项目不存在')
         serializer.save(project_id=project_id)

@@ -562,13 +562,35 @@ class UiFlowRunner:
             double_click(target)
     
     def _action_swipe(self, step: Dict[str, Any]):
-        """滑动动作"""
+        """滑动动作
+
+        支持三种坐标格式：
+        1. start/end 元组: {start: [100,200], end: [100,400]}
+        2. start_x/start_y/end_x/end_y 百分比或像素: {start_x: 0.5, start_y: 0.7, end_x: 0.5, end_y: 0.3}
+        3. selector + selector_type='pos': {selector: [[100,200],[100,400]], selector_type: 'pos'}
+        """
         import json
-        
+
         start = step.get('start')
         end = step.get('end')
         duration = step.get('duration', 0.5)
-        
+
+        # 处理 start_x/start_y/end_x/end_y 百分比格式（场景构建器生成）
+        start_x = step.get('start_x')
+        start_y = step.get('start_y')
+        end_x = step.get('end_x')
+        end_y = step.get('end_y')
+        if not start and not end and start_x is not None and start_y is not None and end_x is not None and end_y is not None:
+            device = G.DEVICE
+            screen_w, screen_h = device.get_current_resolution()
+            # 0~1 之间视为百分比，否则视为像素值
+            def to_pixel(val, screen_max):
+                if isinstance(val, (int, float)) and 0 < val <= 1:
+                    return int(val * screen_max)
+                return int(val)
+            start = (to_pixel(start_x, screen_w), to_pixel(start_y, screen_h))
+            end = (to_pixel(end_x, screen_w), to_pixel(end_y, screen_h))
+
         # 处理 pos 定位方式的 selector
         if not start and not end:
             selector = step.get('selector')
@@ -586,22 +608,22 @@ class UiFlowRunner:
                         raise ValueError(f"Invalid locator for swipe: {locator}")
                 except (json.JSONDecodeError, ValueError) as e:
                     raise ValueError(f"Failed to parse swipe locator: {selector}, error: {e}")
-        
+
         if isinstance(start, str):
             start = tuple(int(x) for x in start.split(','))
         if isinstance(end, str):
             end = tuple(int(x) for x in end.split(','))
-        
+
         if not start or not end:
             raise ValueError(f"Missing start or end coordinates for swipe: start={start}, end={end}")
-        
-        logger.info(f"执行滑动: {start} -> {end}")
+
+        logger.info(f"执行滑动: {start} -> {end}, duration={duration}")
         swipe(start, end, duration=duration)
     
     def _action_wait(self, step: Dict[str, Any]):
         """等待：有 selector 时等待元素出现，没有时纯等待 timeout 秒"""
         target = self._resolve_selector(step)
-        timeout = step.get('timeout', step.get('duration', 3))
+        timeout = step.get('timeout', step.get('duration', step.get('seconds', 3)))
         
         if target:
             logger.info(f"等待元素出现: {target}, 超时: {timeout}s")

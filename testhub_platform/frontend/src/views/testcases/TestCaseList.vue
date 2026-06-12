@@ -15,6 +15,10 @@
           <el-icon><Download /></el-icon>
           {{ $t('testcase.exportExcel') }}
         </el-button>
+        <el-button type="info" @click="handleExportXMind">
+          <el-icon><Download /></el-icon>
+          {{ $t('testcase.exportXMind') }}
+        </el-button>
         <el-button @click="downloadImportTemplate">
           <el-icon><Download /></el-icon>
           {{ $t('testcase.downloadImportTemplate') }}
@@ -225,6 +229,7 @@ import { Plus, Search, Download, Delete, Upload } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
+import { exportToXMind } from '@/utils/xmind'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -545,6 +550,68 @@ const exportToExcel = async () => {
     ElMessage.success(t('testcase.exportSuccess'))
   } catch (error) {
     console.error('Export test cases failed:', error)
+    ElMessage.error(t('testcase.exportFailed') + ': ' + (error.message || t('common.error')))
+  } finally {
+    loading.value = false
+  }
+}
+
+const priorityToXMind = (priority) => {
+  const map = { critical: 'P0', high: 'P1', medium: 'P2', low: 'P3' }
+  return map[priority] || 'P2'
+}
+
+const handleExportXMind = async () => {
+  try {
+    loading.value = true
+
+    let testCasesToExport = []
+
+    if (selectedTestCases.value.length > 0) {
+      testCasesToExport = selectedTestCases.value
+    } else {
+      const pageSize = 100
+      let page = 1
+      let hasMore = true
+
+      while (hasMore) {
+        const response = await api.get('/testcases/', {
+          params: {
+            page,
+            page_size: pageSize,
+            search: searchText.value,
+            project: projectFilter.value,
+            priority: priorityFilter.value
+          }
+        })
+        const results = response.data.results || []
+        testCasesToExport.push(...results)
+        hasMore = results.length >= pageSize
+        if (hasMore) page++
+      }
+    }
+
+    if (testCasesToExport.length === 0) {
+      ElMessage.warning(t('testcase.noDataToExport'))
+      loading.value = false
+      return
+    }
+
+    const xmindCases = testCasesToExport.map((tc, index) => ({
+      caseId: `TC${String(index + 1).padStart(3, '0')}`,
+      scenario: tc.title || '',
+      precondition: convertBrToNewline(tc.preconditions || ''),
+      steps: convertBrToNewline(tc.steps || ''),
+      expected: convertBrToNewline(tc.expected_result || ''),
+      priority: priorityToXMind(tc.priority)
+    }))
+
+    const fileName = t('testcase.xmindFileName', { date: new Date().toISOString().slice(0, 10) })
+    await exportToXMind({ fileName, title: t('testcase.xmindTitle'), testCases: xmindCases })
+
+    ElMessage.success(t('testcase.exportSuccess'))
+  } catch (error) {
+    console.error('Export XMind failed:', error)
     ElMessage.error(t('testcase.exportFailed') + ': ' + (error.message || t('common.error')))
   } finally {
     loading.value = false
