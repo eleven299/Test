@@ -200,7 +200,6 @@ export default {
     jsonPathExpression: 'JSON path expression',
     jsonPathExample: 'Enter JSONPath expression, e.g.: $.data.users[0].name',
     extractResult: 'Extracted result:',
-    actual: 'Actual:',
     importCurlCommand: 'Import cURL Command',
     pasteCurlCommand: 'Paste cURL command here, e.g.: curl -X POST https://api.example.com/users -H \'Content-Type: application/json\' -d \'{"name":"test"}\'',
     parseAndImport: 'Parse and Import',
@@ -761,14 +760,11 @@ export default {
         crontab: 'Crontab',
         uncategorized: 'Uncategorized',
         // English category name mapping (for API returned English category names)
+        // 单词类别(crontab/uncategorized)已由上方 camelCase 键覆盖,这里只列带空格的多词类别
         'random numbers': 'Random Numbers',
         'test data': 'Test Data',
-        'string': 'String',
         'encoding conversion': 'Encoding Conversion',
-        'encryption': 'Encryption',
-        'date & time': 'Date & Time',
-        'crontab': 'Crontab',
-        'uncategorized': 'Uncategorized'
+        'date & time': 'Date & Time'
       },
       // Variable descriptions
       variables: {
@@ -869,6 +865,53 @@ export default {
       currentValue: 'Current Value',
       close: 'Close',
       editEnvironment: 'Edit Environment'
+    },
+    scriptEditor: {
+      phasePre: 'pre',
+      phasePost: 'post',
+      toggleHelp: 'Show API reference',
+      helpVars: 'Read/write variables; values written here can be referenced as {{varName}} in later requests',
+      helpRequest: 'Current request snapshot (method/url/headers/body), read-only',
+      helpResponse: 'Response object (post phase only; supports .json() / .text / .headers / .status_code), read-only',
+      helpLog: 'Emit a log entry; visible in the execution report',
+      helpInjectedTitle: 'Pre-imported modules (no import needed)',
+      helpExampleTitle: 'Example'
+    },
+    assertionEditor: {
+      columnEnable: 'Enabled',
+      columnName: 'Name',
+      columnSource: 'Source',
+      sourceStatus_code: 'HTTP Status Code',
+      sourceResponse_time: 'Response Time (ms)',
+      sourceJson_body: 'JSON Body (JSONPath)',
+      sourceHeader: 'Response Header',
+      sourceRaw_body: 'Raw Body',
+      columnOperator: 'Operator',
+      opEquals: 'equals ==',
+      opNot_equals: 'not equals !=',
+      opContains: 'contains',
+      opNot_contains: 'not contains',
+      opGreater_than: 'greater than >',
+      opLess_than: 'less than <',
+      opGreater_equal: 'greater or equal >=',
+      opLess_equal: 'less or equal <=',
+      opIn_array: 'in array',
+      opNot_in_array: 'not in array',
+      opRegex: 'regex match',
+      opLength_eq: 'length equals',
+      opExists: 'exists (not empty)',
+      opNot_exists: 'not exists (empty)',
+      opType_is: 'type is',
+      columnExpression: 'Expression / Path',
+      columnExpected: 'Expected',
+      columnMessage: 'Failure message',
+      columnActions: 'Actions',
+      add: 'Add assertion',
+      remove: 'Remove',
+      noData: 'No assertions yet',
+      emptyExpected: 'Expected value cannot be empty',
+      emptyExpression: 'Expression cannot be empty',
+      legacyHint: 'This assertion uses the legacy format; it will be auto-converted on save'
     }
   },
 

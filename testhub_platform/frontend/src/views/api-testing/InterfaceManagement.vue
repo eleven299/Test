@@ -304,13 +304,11 @@
 
             <!-- HTTP接口专用标签页 -->
             <template v-if="!selectedRequest || selectedRequest.request_type !== 'WEBSOCKET'">
-              <el-tab-pane label="Pre-request Script" name="pre-script">
+              <el-tab-pane :label="$t('apiTesting.interface.preRequestScript')" name="pre-script">
                 <div class="script-editor-container">
-                  <el-input
+                  <ScriptEditor
                     v-model="selectedRequest.pre_request_script"
-                    type="textarea"
-                    :rows="10"
-                    placeholder="// 请求前脚本，使用JavaScript语法"
+                    phase="pre"
                   />
                   <div class="script-buttons">
                     <el-button
@@ -335,13 +333,11 @@
                 </div>
               </el-tab-pane>
 
-              <el-tab-pane label="Tests" name="tests">
+              <el-tab-pane :label="$t('apiTesting.interface.postRequestScript')" name="tests">
                 <div class="script-editor-container">
-                  <el-input
+                  <ScriptEditor
                     v-model="selectedRequest.post_request_script"
-                    type="textarea"
-                    :rows="10"
-                    placeholder="// 请求后脚本和测试，使用JavaScript语法"
+                    phase="post"
                   />
                   <div class="script-buttons">
                     <el-button
@@ -367,299 +363,42 @@
               </el-tab-pane>
 
               <el-tab-pane :label="$t('apiTesting.interface.assertions')" name="assertions">
-                <div class="assertions-editor">
-                  <div class="assertions-header">
-                    <el-button size="small" type="primary" @click="addAssertion">
-                      <el-icon><Plus /></el-icon>
-                      {{ $t('apiTesting.interface.addAssertion') }}
-                    </el-button>
-                  </div>
-
-                  <div class="assertions-list">
-                    <div
-                      v-for="(assertion, index) in selectedRequest.assertions"
-                      :key="index"
-                      class="assertion-item"
+                <AssertionEditor
+                  v-model="selectedRequest.assertions"
+                  ref="assertionEditorRef"
+                >
+                  <template #expected-extras="{ item, index, needsExpected }">
+                    <el-tooltip
+                      v-if="needsExpected"
+                      :content="$t('apiTesting.interface.referDataFactory')"
+                      placement="top"
                     >
-                      <div class="assertion-header">
-                        <el-input
-                          v-model="assertion.name"
-                          :placeholder="$t('apiTesting.interface.assertionName')"
-                          size="small"
-                          class="assertion-name"
-                        />
-                        <el-button
-                          size="small"
-                          type="danger"
-                          @click="removeAssertion(index)"
-                          circle
-                        >
-                          <el-icon><Delete /></el-icon>
-                        </el-button>
-                      </div>
-
-                      <div class="assertion-config">
-                        <el-select
-                          v-model="assertion.type"
-                          :placeholder="$t('apiTesting.interface.selectAssertionType')"
-                          size="small"
-                          @change="onAssertionTypeChange(assertion)"
-                        >
-                          <el-option :label="$t('apiTesting.interface.assertionTypes.statusCode')" value="status_code" />
-                          <el-option :label="$t('apiTesting.interface.assertionTypes.responseTime')" value="response_time" />
-                          <el-option :label="$t('apiTesting.interface.assertionTypes.contains')" value="contains" />
-                          <el-option :label="$t('apiTesting.interface.assertionTypes.jsonPath')" value="json_path" />
-                          <el-option :label="$t('apiTesting.interface.assertionTypes.header')" value="header" />
-                          <el-option :label="$t('apiTesting.interface.assertionTypes.equals')" value="equals" />
-                        </el-select>
-
-                        <div class="assertion-params" v-if="assertion.type">
-                          <!-- 状态码断言 -->
-                          <div v-if="assertion.type === 'status_code'">
-                            <el-input-number
-                              v-model="assertion.expected"
-                              :min="100"
-                              :max="599"
-                              size="small"
-                              :placeholder="$t('apiTesting.interface.expectedStatusCode')"
-                            />
-                          </div>
-
-                          <!-- 响应时间断言 -->
-                          <div v-else-if="assertion.type === 'response_time'">
-                            <el-input-number
-                              v-model="assertion.expected"
-                              :min="1"
-                              size="small"
-                              :placeholder="$t('apiTesting.interface.maxResponseTime')"
-                            />
-                          </div>
-
-                          <!-- 包含文本断言 -->
-                          <div v-else-if="assertion.type === 'contains'">
-                            <div style="display: flex; align-items: center; width: 100%">
-                              <el-input
-                                v-model="assertion.expected"
-                                :placeholder="$t('apiTesting.interface.expectedContains')"
-                                size="small"
-                                style="flex: 1"
-                              >
-                                <template #append>
-                                  <el-button
-                                    size="small"
-                                    :icon="MagicStick"
-                                    @click="openDataFactorySelector(assertion, 'expected', index)"
-                                    :title="$t('apiTesting.interface.referDataFactory')"
-                                    class="data-factory-btn"
-                                  />
-                                </template>
-                              </el-input>
-                              <el-tooltip :content="$t('apiTesting.interface.insertDynamicVariable')" placement="top">
-                                <el-button size="small" style="margin-left: 5px" @click="openVariableHelperForAssertion(assertion, 'expected', index)" class="variable-helper-btn">
-                                  <el-icon><MagicStick /></el-icon>
-                                </el-button>
-                              </el-tooltip>
-                            </div>
-                          </div>
-
-                          <!-- JSON路径断言 -->
-                          <div v-else-if="assertion.type === 'json_path'">
-                            <el-input
-                              v-model="assertion.json_path"
-                              :placeholder="$t('apiTesting.interface.jsonPathExample')"
-                              size="small"
-                              class="assertion-input"
-                            />
-                            <div style="display: flex; align-items: center; width: 100%">
-                              <el-input
-                                v-model="assertion.expected"
-                                :placeholder="$t('apiTesting.interface.expectedValue')"
-                                size="small"
-                                style="flex: 1"
-                              >
-                                <template #append>
-                                  <el-button
-                                    size="small"
-                                    :icon="MagicStick"
-                                    @click="openDataFactorySelector(assertion, 'expected', index)"
-                                    :title="$t('apiTesting.interface.referDataFactory')"
-                                    class="data-factory-btn"
-                                  />
-                                </template>
-                              </el-input>
-                              <el-tooltip :content="$t('apiTesting.interface.insertDynamicVariable')" placement="top">
-                                <el-button size="small" style="margin-left: 5px" @click="openVariableHelperForAssertion(assertion, 'expected', index)" class="variable-helper-btn">
-                                  <el-icon><MagicStick /></el-icon>
-                                </el-button>
-                              </el-tooltip>
-                            </div>
-                          </div>
-
-                          <!-- 响应头断言 -->
-                          <div v-else-if="assertion.type === 'header'">
-                            <el-input
-                              v-model="assertion.header_name"
-                              :placeholder="$t('apiTesting.interface.headerNameLabel')"
-                              size="small"
-                              class="assertion-input"
-                            />
-                            <div style="display: flex; align-items: center; width: 100%">
-                              <el-input
-                                v-model="assertion.expected_value"
-                                :placeholder="$t('apiTesting.interface.expectedValue')"
-                                size="small"
-                                style="flex: 1"
-                              >
-                                <template #append>
-                                  <el-button
-                                    size="small"
-                                    :icon="MagicStick"
-                                    @click="openDataFactorySelector(assertion, 'expected_value', index)"
-                                    :title="$t('apiTesting.interface.referDataFactory')"
-                                    class="data-factory-btn"
-                                  />
-                                </template>
-                              </el-input>
-                              <el-tooltip :content="$t('apiTesting.interface.insertDynamicVariable')" placement="top">
-                                <el-button size="small" style="margin-left: 5px" @click="openVariableHelperForAssertion(assertion, 'expected_value', index)" class="variable-helper-btn">
-                                  <el-icon><MagicStick /></el-icon>
-                                </el-button>
-                              </el-tooltip>
-                            </div>
-                          </div>
-
-                          <!-- 完全匹配断言 -->
-                          <div v-else-if="assertion.type === 'equals'">
-                            <div style="display: flex; align-items: center; width: 100%">
-                              <el-input
-                                v-model="assertion.expected"
-                                :placeholder="$t('apiTesting.interface.expectedMatch')"
-                                size="small"
-                                style="flex: 1"
-                              >
-                                <template #append>
-                                  <el-button
-                                    size="small"
-                                    :icon="MagicStick"
-                                    @click="openDataFactorySelector(assertion, 'expected', index)"
-                                    :title="$t('apiTesting.interface.referDataFactory')"
-                                    class="data-factory-btn"
-                                  />
-                                </template>
-                              </el-input>
-                              <el-tooltip :content="$t('apiTesting.interface.insertDynamicVariable')" placement="top">
-                                <el-button size="small" style="margin-left: 5px" @click="openVariableHelperForAssertion(assertion, 'expected', index)" class="variable-helper-btn">
-                                  <el-icon><MagicStick /></el-icon>
-                                </el-button>
-                              </el-tooltip>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div v-if="!selectedRequest.assertions || selectedRequest.assertions.length === 0" class="no-assertions">
-                      <p>{{ $t('apiTesting.interface.noAssertions') }}</p>
-                      <el-button size="small" type="primary" @click="addAssertion">
-                        <el-icon><Plus /></el-icon>
-                        {{ $t('apiTesting.interface.addFirstAssertion') }}
+                      <el-button
+                        size="small"
+                        :icon="MagicStick"
+                        @click="openDataFactorySelector(item, 'expected', index)"
+                        class="data-factory-btn"
+                      />
+                    </el-tooltip>
+                    <el-tooltip
+                      v-if="needsExpected"
+                      :content="$t('apiTesting.interface.insertDynamicVariable')"
+                      placement="top"
+                    >
+                      <el-button
+                        size="small"
+                        @click="openVariableHelperForAssertion(item, 'expected', index)"
+                        class="variable-helper-btn"
+                      >
+                        <el-icon><MagicStick /></el-icon>
                       </el-button>
-                    </div>
-                  </div>
-                </div>
+                    </el-tooltip>
+                  </template>
+                </AssertionEditor>
               </el-tab-pane>
 
               <el-tab-pane :label="$t('apiTesting.interface.extractors')" name="extractors">
-                <div class="extractors-editor">
-                  <div class="editor-hint">{{ $t('apiTesting.interface.extractorsHint') }}</div>
-                  <div class="extractors-header">
-                    <el-button size="small" type="primary" @click="addExtractor">
-                      <el-icon><Plus /></el-icon>
-                      {{ $t('apiTesting.interface.addExtractor') }}
-                    </el-button>
-                  </div>
-
-                  <div class="extractors-list">
-                    <div
-                      v-for="(extractor, index) in (selectedRequest.extractors || [])"
-                      :key="index"
-                      class="extractor-item"
-                    >
-                      <div class="extractor-row">
-                        <el-input
-                          v-model="extractor.name"
-                          :placeholder="$t('apiTesting.interface.extractorName')"
-                          size="small"
-                          class="extractor-name-input"
-                        />
-                        <el-select
-                          v-model="extractor.source"
-                          :placeholder="$t('apiTesting.interface.extractorSource')"
-                          size="small"
-                          class="extractor-source-select"
-                          @change="onExtractorSourceChange(extractor)"
-                        >
-                          <el-option
-                            v-for="(label, key) in extractorSourceOptions"
-                            :key="key"
-                            :label="label"
-                            :value="key"
-                          />
-                        </el-select>
-                        <el-input
-                          v-if="needsExpression(extractor.source)"
-                          v-model="extractor.expression"
-                          :placeholder="extractorExpressionHint(extractor.source)"
-                          size="small"
-                          class="extractor-expr-input"
-                        />
-                        <el-input-number
-                          v-if="extractor.source === 'regex'"
-                          v-model="extractor.group"
-                          :min="0"
-                          size="small"
-                          class="extractor-group-input"
-                          :placeholder="$t('apiTesting.interface.extractorGroup')"
-                        />
-                        <el-select
-                          v-model="extractor.target_scope"
-                          :placeholder="$t('apiTesting.interface.extractorScope')"
-                          size="small"
-                          class="extractor-scope-select"
-                        >
-                          <el-option
-                            v-for="(label, key) in extractorScopeOptions"
-                            :key="key"
-                            :label="label"
-                            :value="key"
-                          />
-                        </el-select>
-                        <el-input
-                          v-model="extractor.default"
-                          :placeholder="$t('apiTesting.interface.extractorDefault')"
-                          size="small"
-                          class="extractor-default-input"
-                        />
-                        <el-button
-                          size="small"
-                          type="danger"
-                          circle
-                          @click="removeExtractor(index)"
-                        >
-                          <el-icon><Delete /></el-icon>
-                        </el-button>
-                      </div>
-                    </div>
-
-                    <div v-if="!selectedRequest.extractors || selectedRequest.extractors.length === 0" class="no-extractors">
-                      <p>{{ $t('apiTesting.interface.extractorNoRecords') }}</p>
-                      <el-button size="small" type="primary" @click="addExtractor">
-                        <el-icon><Plus /></el-icon>
-                        {{ $t('apiTesting.interface.addFirstExtractor') }}
-                      </el-button>
-                    </div>
-                  </div>
-                </div>
+                <ExtractorEditor v-model="selectedRequest.extractors" />
               </el-tab-pane>
 
               <el-tab-pane :label="$t('apiTesting.interface.executionSettings')" name="exec-settings">
@@ -1077,6 +816,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Folder, Document, MagicStick, Search, Close } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import KeyValueEditor from './components/KeyValueEditor.vue'
+import ScriptEditor from './components/ScriptEditor.vue'
+import AssertionEditor from './components/AssertionEditor.vue'
+import ExtractorEditor from './components/ExtractorEditor.vue'
 import DataFactorySelector from '@/components/DataFactorySelector.vue'
 import { RequestModelParser } from '@/utils/requestModel'
 import { getVariableFunctions } from '@/api/data-factory'
@@ -1107,6 +849,7 @@ const contextMenuX = ref(0)
 const contextMenuY = ref(0)
 const rightClickedNode = ref(null)
 const headersEditorRef = ref(null)
+const assertionEditorRef = ref(null)
 const editingNodeId = ref(null)
 const editingNodeName = ref('')
 const editInputRef = ref(null)
@@ -2006,110 +1749,10 @@ const onBodyTypeChange = () => {
   }
 }
 
-const addAssertion = () => {
-  if (!selectedRequest.value) return
-
-  if (!selectedRequest.value.assertions) {
-    selectedRequest.value.assertions = []
-  }
-
-  selectedRequest.value.assertions.push({
-    name: `${t('apiTesting.interface.assertion')}${selectedRequest.value.assertions.length + 1}`,
-    type: 'status_code',
-    expected: 200
-  })
-}
-
-const removeAssertion = (index) => {
-  if (!selectedRequest.value || !selectedRequest.value.assertions) return
-
-  selectedRequest.value.assertions.splice(index, 1)
-}
-
-const onAssertionTypeChange = (assertion) => {
-  // 根据断言类型重置相关字段
-  if (assertion.type === 'status_code') {
-    assertion.expected = 200
-  } else if (assertion.type === 'response_time') {
-    assertion.expected = 1000
-  } else if (assertion.type === 'contains') {
-    assertion.expected = ''
-  } else if (assertion.type === 'json_path') {
-    assertion.json_path = ''
-    assertion.expected = ''
-  } else if (assertion.type === 'header') {
-    assertion.header_name = ''
-    assertion.expected_value = ''
-  } else if (assertion.type === 'equals') {
-    assertion.expected = ''
-  }
-}
-
-const extractorSourceOptions = computed(() => ({
-  json_body: t('apiTesting.interface.extractorSources.json_body'),
-  header: t('apiTesting.interface.extractorSources.header'),
-  status_code: t('apiTesting.interface.extractorSources.status_code'),
-  regex: t('apiTesting.interface.extractorSources.regex'),
-  raw_body: t('apiTesting.interface.extractorSources.raw_body'),
-  xml_body: t('apiTesting.interface.extractorSources.xml_body')
-}))
-
-const extractorScopeOptions = computed(() => ({
-  extracted: t('apiTesting.interface.extractorScopes.extracted'),
-  request: t('apiTesting.interface.extractorScopes.request'),
-  global: t('apiTesting.interface.extractorScopes.global')
-}))
-
 const scriptRuntimeOptions = computed(() => ({
   python: t('apiTesting.interface.scriptRuntimes.python'),
   disabled: t('apiTesting.interface.scriptRuntimes.disabled')
 }))
-
-const needsExpression = (source) => {
-  return source !== 'status_code' && source !== 'raw_body'
-}
-
-const extractorExpressionHint = (source) => {
-  const key = `apiTesting.interface.extractorExpressionHint.${source}`
-  const fallback = t('apiTesting.interface.extractorExpression')
-  const translated = t(key)
-  return translated === key ? fallback : translated
-}
-
-const addExtractor = () => {
-  if (!selectedRequest.value) return
-
-  if (!selectedRequest.value.extractors) {
-    selectedRequest.value.extractors = []
-  }
-
-  selectedRequest.value.extractors.push({
-    name: `var_${selectedRequest.value.extractors.length + 1}`,
-    source: 'json_body',
-    expression: '',
-    target_scope: 'extracted',
-    group: 0,
-    default: ''
-  })
-}
-
-const removeExtractor = (index) => {
-  if (!selectedRequest.value || !selectedRequest.value.extractors) return
-  selectedRequest.value.extractors.splice(index, 1)
-}
-
-const onExtractorSourceChange = (extractor) => {
-  if (extractor.source === 'regex') {
-    if (extractor.group === undefined || extractor.group === null) {
-      extractor.group = 0
-    }
-  } else {
-    extractor.group = 0
-  }
-  if (extractor.source === 'status_code' || extractor.source === 'raw_body') {
-    extractor.expression = ''
-  }
-}
 
 const formatResponse = () => {
   if (!response.value || !response.value.response_data) return
