@@ -568,6 +568,148 @@
                   </div>
                 </div>
               </el-tab-pane>
+
+              <el-tab-pane :label="$t('apiTesting.interface.extractors')" name="extractors">
+                <div class="extractors-editor">
+                  <div class="editor-hint">{{ $t('apiTesting.interface.extractorsHint') }}</div>
+                  <div class="extractors-header">
+                    <el-button size="small" type="primary" @click="addExtractor">
+                      <el-icon><Plus /></el-icon>
+                      {{ $t('apiTesting.interface.addExtractor') }}
+                    </el-button>
+                  </div>
+
+                  <div class="extractors-list">
+                    <div
+                      v-for="(extractor, index) in (selectedRequest.extractors || [])"
+                      :key="index"
+                      class="extractor-item"
+                    >
+                      <div class="extractor-row">
+                        <el-input
+                          v-model="extractor.name"
+                          :placeholder="$t('apiTesting.interface.extractorName')"
+                          size="small"
+                          class="extractor-name-input"
+                        />
+                        <el-select
+                          v-model="extractor.source"
+                          :placeholder="$t('apiTesting.interface.extractorSource')"
+                          size="small"
+                          class="extractor-source-select"
+                          @change="onExtractorSourceChange(extractor)"
+                        >
+                          <el-option
+                            v-for="(label, key) in extractorSourceOptions"
+                            :key="key"
+                            :label="label"
+                            :value="key"
+                          />
+                        </el-select>
+                        <el-input
+                          v-if="needsExpression(extractor.source)"
+                          v-model="extractor.expression"
+                          :placeholder="extractorExpressionHint(extractor.source)"
+                          size="small"
+                          class="extractor-expr-input"
+                        />
+                        <el-input-number
+                          v-if="extractor.source === 'regex'"
+                          v-model="extractor.group"
+                          :min="0"
+                          size="small"
+                          class="extractor-group-input"
+                          :placeholder="$t('apiTesting.interface.extractorGroup')"
+                        />
+                        <el-select
+                          v-model="extractor.target_scope"
+                          :placeholder="$t('apiTesting.interface.extractorScope')"
+                          size="small"
+                          class="extractor-scope-select"
+                        >
+                          <el-option
+                            v-for="(label, key) in extractorScopeOptions"
+                            :key="key"
+                            :label="label"
+                            :value="key"
+                          />
+                        </el-select>
+                        <el-input
+                          v-model="extractor.default"
+                          :placeholder="$t('apiTesting.interface.extractorDefault')"
+                          size="small"
+                          class="extractor-default-input"
+                        />
+                        <el-button
+                          size="small"
+                          type="danger"
+                          circle
+                          @click="removeExtractor(index)"
+                        >
+                          <el-icon><Delete /></el-icon>
+                        </el-button>
+                      </div>
+                    </div>
+
+                    <div v-if="!selectedRequest.extractors || selectedRequest.extractors.length === 0" class="no-extractors">
+                      <p>{{ $t('apiTesting.interface.extractorNoRecords') }}</p>
+                      <el-button size="small" type="primary" @click="addExtractor">
+                        <el-icon><Plus /></el-icon>
+                        {{ $t('apiTesting.interface.addFirstExtractor') }}
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
+              </el-tab-pane>
+
+              <el-tab-pane :label="$t('apiTesting.interface.executionSettings')" name="exec-settings">
+                <div class="exec-settings-editor">
+                  <div class="editor-hint">{{ $t('apiTesting.interface.executionSettingsHint') }}</div>
+                  <el-form label-width="180px" label-position="left" class="exec-settings-form">
+                    <el-form-item :label="$t('apiTesting.interface.requestTimeout')">
+                      <el-input-number
+                        v-model="selectedRequest.timeout"
+                        :min="1"
+                        :max="600"
+                        size="default"
+                      />
+                    </el-form-item>
+                    <el-form-item :label="$t('apiTesting.interface.requestRetryCount')">
+                      <el-input-number
+                        v-model="selectedRequest.retry_count"
+                        :min="0"
+                        :max="10"
+                        size="default"
+                      />
+                    </el-form-item>
+                    <el-form-item :label="$t('apiTesting.interface.requestRetryInterval')">
+                      <el-input-number
+                        v-model="selectedRequest.retry_interval"
+                        :min="0"
+                        :max="60"
+                        :step="0.5"
+                        size="default"
+                      />
+                    </el-form-item>
+                    <el-form-item :label="$t('apiTesting.interface.skipSslVerify')">
+                      <el-switch v-model="selectedRequest.skip_ssl_verify" />
+                    </el-form-item>
+                    <el-form-item :label="$t('apiTesting.interface.scriptRuntime')">
+                      <el-select
+                        v-model="selectedRequest.script_runtime"
+                        :placeholder="$t('apiTesting.interface.scriptRuntime')"
+                      >
+                        <el-option
+                          v-for="(label, key) in scriptRuntimeOptions"
+                          :key="key"
+                          :label="label"
+                          :value="key"
+                        />
+                      </el-select>
+                    </el-form-item>
+                  </el-form>
+                </div>
+              </el-tab-pane>
             </template>
 
             <!-- WebSocket接口专用标签页 -->
@@ -1329,6 +1471,12 @@ const createEmptyRequest = () => {
     pre_request_script: '',
     post_request_script: '',
     assertions: [],
+    extractors: [],
+    timeout: 30,
+    retry_count: 0,
+    retry_interval: 1,
+    skip_ssl_verify: false,
+    script_runtime: 'python',
     request_type: 'HTTP'
   }
 
@@ -1384,6 +1532,12 @@ const addRequest = () => {
     pre_request_script: '',
     post_request_script: '',
     assertions: [],
+    extractors: [],
+    timeout: 30,
+    retry_count: 0,
+    retry_interval: 1,
+    skip_ssl_verify: false,
+    script_runtime: 'python',
     request_type: 'HTTP'
   }
 
@@ -1888,6 +2042,72 @@ const onAssertionTypeChange = (assertion) => {
     assertion.expected_value = ''
   } else if (assertion.type === 'equals') {
     assertion.expected = ''
+  }
+}
+
+const extractorSourceOptions = computed(() => ({
+  json_body: t('apiTesting.interface.extractorSources.json_body'),
+  header: t('apiTesting.interface.extractorSources.header'),
+  status_code: t('apiTesting.interface.extractorSources.status_code'),
+  regex: t('apiTesting.interface.extractorSources.regex'),
+  raw_body: t('apiTesting.interface.extractorSources.raw_body'),
+  xml_body: t('apiTesting.interface.extractorSources.xml_body')
+}))
+
+const extractorScopeOptions = computed(() => ({
+  extracted: t('apiTesting.interface.extractorScopes.extracted'),
+  request: t('apiTesting.interface.extractorScopes.request'),
+  global: t('apiTesting.interface.extractorScopes.global')
+}))
+
+const scriptRuntimeOptions = computed(() => ({
+  python: t('apiTesting.interface.scriptRuntimes.python'),
+  disabled: t('apiTesting.interface.scriptRuntimes.disabled')
+}))
+
+const needsExpression = (source) => {
+  return source !== 'status_code' && source !== 'raw_body'
+}
+
+const extractorExpressionHint = (source) => {
+  const key = `apiTesting.interface.extractorExpressionHint.${source}`
+  const fallback = t('apiTesting.interface.extractorExpression')
+  const translated = t(key)
+  return translated === key ? fallback : translated
+}
+
+const addExtractor = () => {
+  if (!selectedRequest.value) return
+
+  if (!selectedRequest.value.extractors) {
+    selectedRequest.value.extractors = []
+  }
+
+  selectedRequest.value.extractors.push({
+    name: `var_${selectedRequest.value.extractors.length + 1}`,
+    source: 'json_body',
+    expression: '',
+    target_scope: 'extracted',
+    group: 0,
+    default: ''
+  })
+}
+
+const removeExtractor = (index) => {
+  if (!selectedRequest.value || !selectedRequest.value.extractors) return
+  selectedRequest.value.extractors.splice(index, 1)
+}
+
+const onExtractorSourceChange = (extractor) => {
+  if (extractor.source === 'regex') {
+    if (extractor.group === undefined || extractor.group === null) {
+      extractor.group = 0
+    }
+  } else {
+    extractor.group = 0
+  }
+  if (extractor.source === 'status_code' || extractor.source === 'raw_body') {
+    extractor.expression = ''
   }
 }
 
@@ -3557,6 +3777,109 @@ const useLocalVariableCategories = () => {
 .assertion-input {
   margin-bottom: 12px;
   border-radius: 6px;
+}
+
+/* 变量提取 */
+.extractors-editor {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.editor-hint {
+  font-size: 12px;
+  color: #6c757d;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #eef2ff;
+  border-left: 3px solid #5046e5;
+  border-radius: 4px;
+}
+
+.extractors-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.extractors-header .el-button {
+  border-radius: 8px;
+  background: #5046e5;
+  border: none;
+  font-weight: 500;
+}
+
+.extractors-header .el-button:hover {
+  background: #4338ca;
+}
+
+.extractors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.extractor-item {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.extractor-item:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  border-color: #dee2e6;
+}
+
+.extractor-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.extractor-name-input { width: 160px; }
+.extractor-source-select { width: 200px; }
+.extractor-expr-input { flex: 1; min-width: 220px; }
+.extractor-group-input { width: 120px; }
+.extractor-scope-select { width: 200px; }
+.extractor-default-input { width: 160px; }
+
+.no-extractors {
+  padding: 32px;
+  text-align: center;
+  color: #6c757d;
+  background: white;
+  border-radius: 8px;
+  border: 1px dashed #dee2e6;
+}
+
+.no-extractors p {
+  margin-bottom: 12px;
+}
+
+/* 执行设�� */
+.exec-settings-editor {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.exec-settings-form {
+  max-width: 640px;
+  background: white;
+  padding: 24px;
+  border-radius: 10px;
+  border: 1px solid #e9ecef;
+}
+
+.exec-settings-form .el-form-item {
+  margin-bottom: 18px;
 }
 
 /* 标签页按钮 */

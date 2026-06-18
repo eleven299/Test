@@ -6,7 +6,7 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Avg, Count, F
 from django.utils import timezone
 
-from .models import AnalyticsEvent, RegistrationStats
+from .models import AnalyticsEvent, HomeCardClickStat, RegistrationStats
 
 MODULE_LABELS = {
     'home': '首页',
@@ -340,3 +340,15 @@ class RegistrationStatsAdmin(admin.ModelAdmin):
             )[:10]
         )
         return response
+
+
+@admin.register(HomeCardClickStat)
+class HomeCardClickStatAdmin(admin.ModelAdmin):
+    list_display = ('card_type_display', 'click_count', 'updated_at')
+    search_fields = ('card_type',)
+    ordering = ('-click_count',)
+    readonly_fields = ('card_type', 'click_count', 'created_at', 'updated_at')
+
+    def card_type_display(self, obj):
+        return HOME_CARD_LABELS.get(obj.card_type, obj.card_type)
+    card_type_display.short_description = '模块名称'

@@ -11,10 +11,17 @@
           :disabled="isDeleting">
           {{ $t('execution.batchDelete') }} ({{ selectedPlans.length }})
         </el-button>
-        <el-button type="primary" @click="openCreatePlanDialog">
+        <el-dropdown split-button type="primary" @click="openCreatePlanDialog" @command="createFromTemplate">
           <el-icon><Plus /></el-icon>
           {{ $t('execution.newPlan') }}
-        </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item :icon="Document" command="app_two_week">
+                {{ $t('execution.templateAppTwoWeek') }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -340,7 +347,7 @@ import { ref, reactive, onMounted, watch, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, Document } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 
 const { t } = useI18n()
@@ -739,6 +746,20 @@ const togglePlanStatus = async (plan) => {
 
 const openCreatePlanDialog = () => {
   resetPlanForm()
+  isCreatePlanDialogOpen.value = true
+}
+
+const createFromTemplate = (templateKey) => {
+  resetPlanForm()
+  if (templateKey === 'app_two_week') {
+    const today = new Date()
+    const y = today.getFullYear()
+    const m = String(today.getMonth() + 1).padStart(2, '0')
+    const d = String(today.getDate()).padStart(2, '0')
+    const versionLabel = `${y}${m}${d}`
+    newPlanForm.name = t('execution.templateAppTwoWeekName', { version: versionLabel })
+    newPlanForm.description = t('execution.templateAppTwoWeekDesc')
+  }
   isCreatePlanDialogOpen.value = true
 }
 

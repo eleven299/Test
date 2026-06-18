@@ -162,6 +162,11 @@ export default {
 
     // Filters
     statusFilter: 'Status Filter:',
+    usernameSearch: 'Username Search:',
+    usernamePlaceholder: 'Enter username, press Enter to search',
+    scopeLabel: 'Scope:',
+    scopeMine: 'My Tasks',
+    scopeAll: 'All Users',
     allStatus: 'All Status',
     pending: 'Analyzing',
     generating: 'Writing',
@@ -194,6 +199,7 @@ export default {
     failedCount: 'Failed',
 
     // Table Headers
+    username: 'Username',
     serialNumber: 'No.',
     taskId: 'Task ID',
     relatedRequirement: 'Requirement',
@@ -233,6 +239,7 @@ export default {
     jumpTo: 'Jump to:',
     pageNumber: 'Page',
     jump: 'Go',
+    invalidPage: 'Please enter a page number between 1 and {max}',
     paginationInfo: 'Showing {start}-{end} of {total}',
 
     // Detail Modal

@@ -6,6 +6,14 @@
 
     <div class="filters-section">
       <div class="filter-card">
+        <div class="filter-group" v-if="isAdmin">
+          <label>{{ $t('generatedTestCases.scopeLabel') }}</label>
+          <select v-model="scope" @change="onScopeChange" class="filter-select">
+            <option value="mine">{{ $t('generatedTestCases.scopeMine') }}</option>
+            <option value="all">{{ $t('generatedTestCases.scopeAll') }}</option>
+          </select>
+        </div>
+
         <div class="filter-group">
           <label>{{ $t('generatedTestCases.statusFilter') }}</label>
           <select v-model="selectedStatus" @change="loadTasks" class="filter-select">
@@ -16,6 +24,16 @@
             <option value="completed">{{ $t('generatedTestCases.statusCompleted') }}</option>
             <option value="failed">{{ $t('generatedTestCases.statusFailed') }}</option>
           </select>
+        </div>
+
+        <div class="filter-group" v-if="isAdmin && scope === 'all'">
+          <label>{{ $t('generatedTestCases.usernameSearch') }}</label>
+          <input
+            v-model="searchUsername"
+            type="text"
+            class="filter-input"
+            :placeholder="$t('generatedTestCases.usernamePlaceholder')"
+            @keyup.enter="onSearch">
         </div>
 
         <div class="filter-actions">
@@ -70,7 +88,7 @@
       </div>
 
       <div v-else class="testcases-table">
-        <div class="table-header">
+        <div class="table-header" :style="tableGridStyle">
           <div class="header-cell checkbox-cell">
             <input
               type="checkbox"
@@ -78,6 +96,7 @@
               :checked="isAllSelected"
               class="task-checkbox">
           </div>
+          <div class="header-cell username-cell" v-if="showUsernameColumn">{{ $t('generatedTestCases.username') }}</div>
           <div class="header-cell serial-cell">{{ $t('generatedTestCases.serialNumber') }}</div>
           <div class="header-cell task-id-cell">{{ $t('generatedTestCases.taskId') }}</div>
           <div class="header-cell requirement-name-cell">{{ $t('generatedTestCases.requirement') }}</div>
@@ -92,7 +111,8 @@
             v-for="(task, index) in tasks" 
             :key="task.task_id"
             class="table-row"
-            :class="{ 'selected': isTaskSelected(task.task_id) }">
+            :class="{ 'selected': isTaskSelected(task.task_id) }"
+            :style="tableGridStyle">
             <div class="body-cell checkbox-cell">
               <input
                 type="checkbox"
@@ -100,6 +120,7 @@
                 @change="toggleTaskSelection(task.task_id)"
                 class="task-checkbox">
             </div>
+            <div class="body-cell username-cell" v-if="showUsernameColumn">{{ task.created_by_name || '-' }}</div>
             <div class="body-cell serial-cell">{{ getSerialNumber(index) }}</div>
             <div class="body-cell task-id-cell">{{ task.task_id }}</div>
             <div class="body-cell requirement-name-cell">
@@ -390,6 +411,9 @@ export default {
       isLoading: false,
       tasks: [], // 改为任务列表
       selectedStatus: '',
+      searchUsername: '',
+      scope: 'mine', // mine | all；admin 默认只看自己，可切换查看全部
+      isAdmin: false,
       selectedTaskDetail: null,
       selectedTestCaseDetail: null,
       showAdoptModal: false,
@@ -432,6 +456,20 @@ export default {
   },
 
   computed: {
+    // 是否显示用户名列（仅管理员在 scope=all 时显示）
+    showUsernameColumn() {
+      return this.isAdmin && this.scope === 'all'
+    },
+
+    // 表格网格列模板：根据是否显示用户名列动态生成
+    tableGridStyle() {
+      // 列宽：复选框50 用户名120 序号60 任务ID180 需求320 状态100 用例数100 时间180 操作200
+      const cols = this.showUsernameColumn
+        ? '50px 120px 60px 180px 320px 100px 100px 180px 200px'
+        : '50px 60px 180px 320px 100px 100px 180px 200px'
+      return { 'grid-template-columns': cols }
+    },
+
     // 可用版本列表 - 根据是否选择项目来决定显示哪些版本
     availableVersions() {
       if (this.adoptForm.project_id) {
@@ -462,24 +500,72 @@ export default {
   },
   
   mounted() {
+    this.initScope()
     this.loadTasks()
     this.fetchProjects()
     this.fetchAllVersions()
   },
   
   methods: {
+    // 判断当前用户是否是管理员，并设置初始 scope
+    // 先从 localStorage 快速判断，再请求后端刷新最新的 is_staff 状态
+    async initScope() {
+      this.scope = 'mine'
+      let cachedStaff = false
+      try {
+        const userStr = localStorage.getItem('user')
+        if (userStr) {
+          const user = JSON.parse(userStr)
+          cachedStaff = !!user.is_staff
+        }
+      } catch {
+        cachedStaff = false
+      }
+      this.isAdmin = cachedStaff
+
+      // 拉取最新用户信息，避免旧 localStorage 缺少 is_staff 字段时无法切换 scope
+      try {
+        const resp = await api.get('/auth/profile/')
+        if (resp.data) {
+          this.isAdmin = !!resp.data.is_staff
+          localStorage.setItem('user', JSON.stringify(resp.data))
+        }
+      } catch {
+        // 拉取失败时保持缓存结果
+      }
+    },
+
+    // 切换数据范围
+    onScopeChange() {
+      // 切回 mine 时清空用户名搜索
+      if (this.scope === 'mine') {
+        this.searchUsername = ''
+      }
+      this.pagination.currentPage = 1
+      this.loadTasks()
+    },
+
     async loadTasks() {
       this.isLoading = true
       try {
         let url = '/requirement-analysis/testcase-generation/'
         const params = new URLSearchParams()
-        
+
         // 添加分页参数
         params.append('page', String(this.pagination.currentPage))
         params.append('page_size', String(this.pagination.pageSize))
-        
+
+        // 数据范围参数（管理员传 scope，普通用户不传，后端默认 mine）
+        if (this.isAdmin) {
+          params.append('scope', this.scope)
+        }
+
         if (this.selectedStatus) {
           params.append('status', this.selectedStatus)
+        }
+
+        if (this.isAdmin && this.scope === 'all' && this.searchUsername && this.searchUsername.trim()) {
+          params.append('username', this.searchUsername.trim())
         }
         
         if (params.toString()) {
@@ -508,6 +594,12 @@ export default {
         // 清空选择（因为任务列表已更新）
         this.selectedTasks = []
       }
+    },
+
+    // 用户名搜索：重置到第一页并加载
+    onSearch() {
+      this.pagination.currentPage = 1
+      this.loadTasks()
     },
 
     // 获取序号
@@ -600,10 +692,19 @@ export default {
         // 获取所有数据来进行统计
         params.append('page_size', '10000') // 设置足够大的页面大小来获取所有数据
         params.append('page', '1')
-        
+
+        // 数据范围参数
+        if (this.isAdmin) {
+          params.append('scope', this.scope)
+        }
+
         // 如果有状态筛选，也应用到统计中
         if (this.selectedStatus) {
           params.append('status', this.selectedStatus)
+        }
+
+        if (this.isAdmin && this.scope === 'all' && this.searchUsername && this.searchUsername.trim()) {
+          params.append('username', this.searchUsername.trim())
         }
         
         url += '?' + params.toString()
@@ -957,7 +1058,7 @@ export default {
         this.jumpPage = ''
         this.loadTasks()
       } else {
-        alert(`请输入 1-${this.totalPages} 之间的页码`)
+        alert(this.$t('generatedTestCases.invalidPage', { max: this.totalPages }))
       }
     },
 
@@ -1065,6 +1166,21 @@ export default {
   font-size: 0.9rem;
   background: white;
   cursor: pointer;
+}
+
+.filter-input {
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: white;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.filter-input:focus {
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
 }
 
 .filter-select:focus {
@@ -1187,12 +1303,26 @@ export default {
 .testcases-table {
   border: 1px solid #ddd;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.testcases-table::-webkit-scrollbar {
+  height: 6px;
+}
+
+.testcases-table::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+
+.testcases-table::-webkit-scrollbar-track {
+  background: #f5f7fa;
 }
 
 .table-header {
   display: grid;
-  grid-template-columns: 50px 60px 180px 320px 100px 100px 180px 200px;
+  min-width: 1190px;
   background: #f8f9fa;
   font-weight: bold;
   color: #2c3e50;
@@ -1200,7 +1330,7 @@ export default {
 
 .table-body .table-row {
   display: grid;
-  grid-template-columns: 50px 60px 180px 320px 100px 100px 180px 200px;
+  min-width: 1190px;
   border-bottom: 1px solid #eee;
   transition: background 0.2s ease;
 }
@@ -1245,6 +1375,14 @@ export default {
   justify-content: center;
   width: 50px;
   flex-shrink: 0;
+}
+
+.username-cell {
+  justify-content: flex-start;
+  width: 120px;
+  flex-shrink: 0;
+  color: #2c3e50;
+  font-weight: 500;
 }
 
 .serial-cell {
@@ -1780,13 +1918,8 @@ export default {
   background: #7f8c8d;
 }
 
-/* 响应式设计 */
+/* 响应式设计：表格内容保持固定宽度，通过水平滚动查看 */
 @media (max-width: 1200px) {
-  .table-header,
-  .table-body .table-row {
-    grid-template-columns: 150px 1fr 100px 140px 260px;
-  }
-
   .action-buttons {
     flex-direction: row;
     gap: 2px;
@@ -1814,11 +1947,6 @@ export default {
     gap: 20px;
   }
 
-  .table-header,
-  .table-body .table-row {
-    grid-template-columns: 120px 1fr 80px 120px 240px;
-  }
-  
   .header-cell,
   .body-cell {
     padding: 8px;

@@ -15,6 +15,7 @@ class NullableDateField(serializers.DateField):
 from .models import (
     ApiProject, ApiCollection, ApiRequest, Environment,
     RequestHistory, TestSuite, TestExecution, TestSuiteRequest,
+    TestStepResult,
     ScheduledTask, TaskExecutionLog, NotificationLog,
     TaskNotificationSetting, OperationLog, AIServiceConfig,
 )
@@ -103,7 +104,12 @@ class ApiRequestSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'request_type', 'method', 'url',
             'headers', 'params', 'body', 'auth', 'pre_request_script',
-            'post_request_script', 'assertions', 'collection', 'order', 'created_by',
+            'post_request_script', 'assertions',
+            # P0 新增:执行控制
+            'timeout', 'retry_count', 'retry_interval', 'skip_ssl_verify',
+            # P0 新增:变量提取与脚本运行时
+            'extractors', 'script_runtime',
+            'collection', 'order', 'created_by',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
@@ -174,7 +180,11 @@ class TestSuiteRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TestSuiteRequest
-        fields = ['id', 'request', 'order', 'assertions', 'enabled']
+        fields = ['id', 'request', 'order', 'assertions', 'enabled',
+                  # P0 新增:步骤级控制
+                  'is_critical', 'timeout_override',
+                  # P2: DDT 数据集
+                  'data_set']
 
 
 class TestSuiteSerializer(serializers.ModelSerializer):
@@ -185,7 +195,9 @@ class TestSuiteSerializer(serializers.ModelSerializer):
         model = TestSuite
         fields = [
             'id', 'name', 'description', 'project', 'environment',
-            'suite_requests', 'created_by', 'created_at', 'updated_at'
+            'suite_requests', 'created_by', 'created_at', 'updated_at',
+            # P0 新增:执行策略
+            'fail_fast', 'think_time', 'max_concurrent', 'default_retry_count',
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -203,7 +215,9 @@ class TestExecutionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'test_suite', 'status', 'start_time', 'end_time',
             'total_requests', 'passed_requests', 'failed_requests',
-            'results', 'executed_by', 'created_at'
+            'results', 'executed_by', 'created_at',
+            # P0 新增
+            'environment_snapshot', 'trigger_source', 'stop_reason',
         ]
 
     def to_representation(self, instance):
@@ -213,6 +227,24 @@ class TestExecutionSerializer(serializers.ModelSerializer):
             data['project_name'] = instance.test_suite.project.name
             data['test_suite_name'] = instance.test_suite.name
         return data
+
+
+class TestStepResultSerializer(serializers.ModelSerializer):
+    """测试步骤结果序列化器(P0 新增)"""
+    suite_request = TestSuiteRequestSerializer(read_only=True)
+    request = ApiRequestSerializer(read_only=True)
+
+    class Meta:
+        model = TestStepResult
+        fields = [
+            'id', 'execution', 'suite_request', 'request',
+            'request_name', 'method', 'url', 'iteration',
+            'status', 'status_code', 'response_time', 'attempt',
+            'request_snapshot', 'response_snapshot',
+            'assertions_results', 'extracted_vars', 'script_logs',
+            'error_message', 'started_at', 'finished_at',
+        ]
+        read_only_fields = ['started_at', 'finished_at']
 
 
 class ScheduledTaskSerializer(serializers.ModelSerializer):

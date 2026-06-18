@@ -103,7 +103,10 @@ export default {
     featureInDevelopment: 'Feature is under development......',
     mobileTipTitle: 'Please use on desktop',
     mobileTipDesc: 'TestHub must be used in a desktop browser. Please switch to a computer to continue.',
-    mobileTipOk: 'Got it'
+    mobileTipOk: 'Got it',
+
+    // Stats
+    clicksCount: 'Clicks'
   },
   profile: {
     // Page

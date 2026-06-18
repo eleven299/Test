@@ -1511,14 +1511,21 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
         if not hasattr(self.request, 'query_params'):
             return queryset.order_by('-created_at')
 
-        # 按创建者过滤：普通用户只能看到自己的任务，管理员可查看所有
+        # 数据隔离：普通用户只能看自己；管理员默认也只看自己，仅当显式传 scope=all 才查看全部
         user = self.request.user
-        if not user.is_staff:
+        scope = self.request.query_params.get('scope', 'mine')
+
+        if not user.is_staff or scope != 'all':
             queryset = queryset.filter(created_by=user)
         else:
             created_by = self.request.query_params.get('created_by')
             if created_by:
                 queryset = queryset.filter(created_by_id=created_by)
+
+            # 用户名模糊搜索（仅管理员查看全部时生效）
+            username = self.request.query_params.get('username')
+            if username:
+                queryset = queryset.filter(created_by__username__icontains=username)
 
         status_param = self.request.query_params.get('status')
         if status_param:
@@ -1677,9 +1684,20 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                                         task.progress = 30
                                         task.save()
 
-                                        generated_cases = loop.run_until_complete(
-                                            AIModelService.generate_test_cases_stream(task, callback=stream_callback)
-                                        )
+                                        try:
+                                            generated_cases = loop.run_until_complete(
+                                                asyncio.wait_for(
+                                                    AIModelService.generate_test_cases_stream(
+                                                        task, callback=stream_callback
+                                                    ),
+                                                    timeout=review_timeout
+                                                )
+                                            )
+                                        except asyncio.TimeoutError:
+                                            logger.error(
+                                                f"任务 {task.task_id} writer 阶段超时（{review_timeout}秒），中止任务")
+                                            raise Exception(
+                                                f"测试用例生成阶段超时（{review_timeout}秒），可能是 AI 模型响应过慢或自动续写次数过多。")
 
                                         # 生成完成后，确保最终的流式内容被保存
                                         if task.stream_buffer:
@@ -1722,10 +1740,13 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                                                             logger.warning(f"保存评审内容失败: {save_error}")
 
                                                 try:
-                                                    # 移除超时限制，允许大文档完整评审
+                                                    # 给 reviewer 加超时保护，超时会被下方 except 捕获并降级使用原用例
                                                     review_feedback = loop.run_until_complete(
-                                                        AIModelService.review_test_cases_stream(
-                                                            task, generated_cases, callback=review_stream_callback
+                                                        asyncio.wait_for(
+                                                            AIModelService.review_test_cases_stream(
+                                                                task, generated_cases, callback=review_stream_callback
+                                                            ),
+                                                            timeout=review_timeout
                                                         )
                                                     )
                                                     # 保存最终评审内容
@@ -1850,9 +1871,18 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                                         task.progress = 30
                                         task.save()
 
-                                        generated_cases = loop.run_until_complete(
-                                            AIModelService.generate_test_cases(task)
-                                        )
+                                        try:
+                                            generated_cases = loop.run_until_complete(
+                                                asyncio.wait_for(
+                                                    AIModelService.generate_test_cases(task),
+                                                    timeout=review_timeout
+                                                )
+                                            )
+                                        except asyncio.TimeoutError:
+                                            logger.error(
+                                                f"任务 {task.task_id} writer 阶段超时（{review_timeout}秒），中止任务")
+                                            raise Exception(
+                                                f"测试用例生成阶段超时（{review_timeout}秒），可能是 AI 模型响应过慢。")
 
                                         task.generated_test_cases = generated_cases
                                         task.progress = 60
@@ -1867,10 +1897,13 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
 
                                                 logger.info(f"开始评审任务 {task.task_id}")
 
-                                                # 移除超时限制，允许大文档完整评审
+                                                # 给 reviewer 加超时保护，超时会被下方 except 捕获并降级使用原用例
                                                 try:
                                                     review_feedback = loop.run_until_complete(
-                                                        AIModelService.review_test_cases(task, generated_cases)
+                                                        asyncio.wait_for(
+                                                            AIModelService.review_test_cases(task, generated_cases),
+                                                            timeout=review_timeout
+                                                        )
                                                     )
                                                     task.review_feedback = review_feedback
                                                     logger.info(f"任务 {task.task_id} 评审完成")
@@ -2411,6 +2444,7 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def save_to_records(self, request, task_id=None):
         """保存测试用例到AI生成用例记录并导入到测试用例管理系统"""
+        from django.db import transaction
         try:
             # DRF会根据lookup_field自动从URL提取task_id并调用get_object()
             task = self.get_object()
@@ -2427,18 +2461,26 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 检查是否已经保存过
-            if hasattr(task, 'is_saved_to_records') and task.is_saved_to_records:
-                return Response(
-                    {'message': '测试用例已经保存到记录中', 'already_saved': True},
-                    status=status.HTTP_200_OK
-                )
+            adopted_count = 0
+            test_cases = []
 
-            # 解析并导入测试用例到测试用例管理系统
-            test_cases = self._parse_test_cases_content(task.final_test_cases)
+            # 事务 + select_for_update 锁定 task，防止并发/重复点击导致重复导入
+            # 任何异常都会冒泡到 atomic 外层，触发事务回滚（保证不会留下半导入），任务也不会被标记为已保存
+            with transaction.atomic():
+                task = TestCaseGenerationTask.objects.select_for_update().get(pk=task.pk)
 
-            if test_cases:
-                try:
+                # 双重检查（防止重复点击或并发请求）
+                if hasattr(task, 'is_saved_to_records') and task.is_saved_to_records:
+                    return Response(
+                        {'message': '测试用例已经保存到记录中', 'already_saved': True},
+                        status=status.HTTP_200_OK
+                    )
+
+                # 解析并导入测试用例到测试用例管理系统
+                test_cases = self._parse_test_cases_content(task.final_test_cases)
+
+                if test_cases:
+                    # 任何异常都会冒泡到 atomic 外层，触发事务回滚（保证不会留下半导入）
                     from apps.testcases.models import TestCase
                     from apps.projects.models import Project
                     from django.db import models
@@ -2481,7 +2523,6 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                                     description='系统自动创建的默认项目'
                                 )
 
-                    adopted_count = 0
                     for test_case in test_cases:
                         TestCase.objects.create(
                             project=project,
@@ -2493,20 +2534,17 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                             expected_result=test_case.get('expected', ''),
                             priority=self._map_priority(test_case.get('priority', '中')),
                             test_type='functional',
-                            status='draft'
+                            status='draft',
+                            is_ai_generated=True
                         )
                         adopted_count += 1
 
                     logger.info(f"成功导入 {adopted_count} 条测试用例到项目 {project.name}")
 
-                except Exception as import_error:
-                    logger.error(f"导入测试用例失败: {import_error}")
-                    # 即使导入失败，仍然标记为已保存
-
-            # 标记任务为已保存
-            task.is_saved_to_records = True
-            task.saved_at = timezone.now()
-            task.save(update_fields=['is_saved_to_records', 'saved_at'])
+                    # 全部成功后再标记任务为已保存（与导入同事务，导入异常时也会回滚）
+                    task.is_saved_to_records = True
+                    task.saved_at = timezone.now()
+                    task.save(update_fields=['is_saved_to_records', 'saved_at'])
 
             return Response({
                 'message': '测试用例已成功保存到AI生成用例记录并导入到测试用例管理系统',
@@ -2526,11 +2564,22 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
     def saved_records(self, request):
         """获取已保存的测试用例记录列表"""
         try:
-            # 获取已保存到记录的任务
-            saved_tasks = TestCaseGenerationTask.objects.filter(
+            # 数据隔离：默认只返回当前用户的记录；管理员显式传 scope=all 才查看全部
+            user = request.user
+            scope = request.query_params.get('scope', 'mine')
+
+            qs = TestCaseGenerationTask.objects.filter(
                 is_saved_to_records=True,
                 status='completed'
-            ).order_by('-saved_at')
+            )
+            if not user.is_staff or scope != 'all':
+                qs = qs.filter(created_by=user)
+            else:
+                username = request.query_params.get('username')
+                if username:
+                    qs = qs.filter(created_by__username__icontains=username)
+
+            saved_tasks = qs.order_by('-saved_at')
 
             # 序列化数据
             serializer = TestCaseGenerationTaskSerializer(saved_tasks, many=True)

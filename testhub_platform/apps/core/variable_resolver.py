@@ -538,8 +538,8 @@ class VariableResolver:
         return None
     
     # ========== 时间日期函数 ==========
-    
-    def _timestamp(self):
+
+    def _timestamp(self, func_name=None, args=None):
         """生成当前时间戳（毫秒）
         Returns:
             时间戳（毫秒）
@@ -547,8 +547,8 @@ class VariableResolver:
             ${timestamp()} -> 1704067200000
         """
         return int(datetime.now().timestamp() * 1000)
-    
-    def _timestamp_sec(self):
+
+    def _timestamp_sec(self, func_name=None, args=None):
         """生成当前时间戳（秒）
         Returns:
             时间戳（秒）
@@ -556,54 +556,55 @@ class VariableResolver:
             ${timestamp_sec()} -> 1704067200
         """
         return int(datetime.now().timestamp())
-    
-    def _datetime(self, format_str='%Y-%m-%d %H:%M:%S'):
+
+    def _datetime(self, func_name=None, args=None):
         """生成当前日期时间
         Args:
-            format_str: 日期时间格式
+            args[0]: 日期时间格式,默认 %Y-%m-%d %H:%M:%S
         Returns:
             格式化的日期时间字符串
         Example:
             ${datetime()} -> "2024-01-01 12:00:00"
             ${datetime(%Y-%m-%d)} -> "2024-01-01"
         """
+        format_str = (args[0] if args else '%Y-%m-%d %H:%M:%S') or '%Y-%m-%d %H:%M:%S'
         return datetime.now().strftime(format_str)
-    
-    def _date(self, format_str='%Y-%m-%d'):
+
+    def _date(self, func_name=None, args=None):
         """生成当前日期
         Args:
-            format_str: 日期格式
+            args[0]: 日期格式,默认 %Y-%m-%d
         Returns:
             格式化的日期字符串
-        Example:
-            ${date()} -> "2024-01-01"
         """
+        format_str = (args[0] if args else '%Y-%m-%d') or '%Y-%m-%d'
         return datetime.now().strftime(format_str)
-    
-    def _time(self, format_str='%H:%M:%S'):
+
+    def _time(self, func_name=None, args=None):
         """生成当前时间
         Args:
-            format_str: 时间格式
+            args[0]: 时间格式,默认 %H:%M:%S
         Returns:
-            格式化的时间字符串
-        Example:
-            ${time()} -> "12:00:00"
+            格式化的时间��符串
         """
+        format_str = (args[0] if args else '%H:%M:%S') or '%H:%M:%S'
         return datetime.now().strftime(format_str)
-    
-    def _date_offset(self, days=0, hours=0, minutes=0, format_str='%Y-%m-%d %H:%M:%S'):
+
+    def _date_offset(self, func_name=None, args=None):
         """生成偏移后的日期时间
         Args:
-            days: 天数偏移
-            hours: 小时偏移
-            minutes: 分钟偏移
-            format_str: 日期时间格式
+            args[0]: 天数偏移
+            args[1]: 小时偏移
+            args[2]: 分钟偏移
+            args[3]: 格式串
         Returns:
             格式化的日期时间字符串
-        Example:
-            ${date_offset(1)} -> "2024-01-02 12:00:00"
-            ${date_offset(0, 1)} -> "2024-01-01 13:00:00"
         """
+        args = args or []
+        days = args[0] if len(args) > 0 else 0
+        hours = args[1] if len(args) > 1 else 0
+        minutes = args[2] if len(args) > 2 else 0
+        format_str = args[3] if len(args) > 3 else '%Y-%m-%d %H:%M:%S'
         dt = datetime.now() + timedelta(days=days, hours=hours, minutes=minutes)
         return dt.strftime(format_str)
 

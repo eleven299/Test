@@ -39,6 +39,7 @@ class TestCase(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name='状态')
     test_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='functional', verbose_name='测试类型')
     tags = models.JSONField(default=list, verbose_name='标签')
+    is_ai_generated = models.BooleanField(default=False, verbose_name='是否AI生成')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='authored_testcases', verbose_name='作者')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_testcases', verbose_name='指派人')
     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')

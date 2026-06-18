@@ -30,7 +30,11 @@ class TestReportViewSet(viewsets.ViewSet):
 
         # 基础查询集（仅限用户可访问的项目）
         plans_qs = TestPlan.objects.filter(is_active=True, projects__in=accessible_ids).distinct()
-        cases_qs = TestCase.objects.filter(project_id__in=accessible_ids)
+        # 「用例总数」卡片口径：AI 生成的用例（testcases.is_ai_generated=True）
+        ai_cases_qs = TestCase.objects.filter(
+            is_ai_generated=True,
+            project_id__in=accessible_ids
+        )
 
         if project_id:
             # 确保请求的project_id在用户可访问范围内
@@ -38,11 +42,11 @@ class TestReportViewSet(viewsets.ViewSet):
             if pid not in accessible_ids:
                 return Response({'error': '项目不存在'}, status=404)
             plans_qs = plans_qs.filter(projects__id=pid)
-            cases_qs = cases_qs.filter(project_id=pid)
-            
+            ai_cases_qs = ai_cases_qs.filter(project_id=pid)
+
         # 统计数据
         total_plans = plans_qs.count()
-        total_cases = cases_qs.count()
+        total_cases = ai_cases_qs.count()
         
         # 计算测试计划总进度
         # 遍历所有活跃计划，计算其下所有TestRun的进度平均值
@@ -224,13 +228,15 @@ class TestReportViewSet(viewsets.ViewSet):
             requirements_qs = requirements_qs.filter(analysis__document__project_id=project_id)
             
         # 1. AI生成 vs 人工创建
-        ai_count = generated_qs.count()
+        # 用 TestCase.is_ai_generated 在同一张表内统计，避免跨表减法导致数值不可靠
+        ai_count = cases_qs.filter(is_ai_generated=True).count()
+        manual_count = cases_qs.filter(is_ai_generated=False).count()
+        total_cases = ai_count + manual_count
+
+        # 生成采纳率：基于 AI 生成记录中已采纳（adopted）的比例
+        generated_total = generated_qs.count()
         adopted_ai_count = generated_qs.filter(status='adopted').count()
-        total_cases = cases_qs.count()
-        manual_count = max(0, total_cases - adopted_ai_count)
-        
-        # 2. 生成采纳率
-        adoption_rate = round((adopted_ai_count / ai_count * 100), 1) if ai_count > 0 else 0
+        adoption_rate = round((adopted_ai_count / generated_total * 100), 1) if generated_total > 0 else 0
         
         # 3. 需求覆盖率
         total_reqs = requirements_qs.count()

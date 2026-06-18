@@ -14,8 +14,22 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .captcha import create_captcha
 from .sms import send_register_verify_code, validate_verify_code
 from .redis_client import get_redis
+from redis.exceptions import RedisError
+import logging
 import re
 import uuid
+
+logger = logging.getLogger(__name__)
+
+
+def _redis_unavailable_response(action: str):
+    """Redis 不可用时返回统一的 503 响应，避免 500 + 长堆栈"""
+    logger.error(f"Redis 不可用，{action} 失败", exc_info=True)
+    return Response(
+        {'error': '验证服务暂时不可用，请稍后重试'},
+        status=status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
@@ -118,7 +132,10 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 @permission_classes([permissions.AllowAny])
 def get_captcha(request):
     """获取图形验证码"""
-    result = create_captcha()
+    try:
+        result = create_captcha()
+    except RedisError:
+        return _redis_unavailable_response('生成图形验证码')
     return Response(result)
 
 
@@ -147,7 +164,10 @@ def send_register_code(request):
         if User.objects.filter(phone=phone).exists():
             return Response({'success': False, 'error': '该手机号已被注册'}, status=status.HTTP_400_BAD_REQUEST)
 
-    result = send_register_verify_code(phone, captcha_token, captcha_code)
+    try:
+        result = send_register_verify_code(phone, captcha_token, captcha_code)
+    except RedisError:
+        return _redis_unavailable_response('发送短信验证码')
 
     if result.get('success'):
         return Response(result)
@@ -174,7 +194,10 @@ def sms_login_view(request):
     if not verify_code or not verify_code_token:
         return Response({'error': '请输入短信验证码'}, status=status.HTTP_400_BAD_REQUEST)
 
-    valid, error = validate_verify_code(phone, verify_code_token, verify_code)
+    try:
+        valid, error = validate_verify_code(phone, verify_code_token, verify_code)
+    except RedisError:
+        return _redis_unavailable_response('校验短信验证码')
     if not valid:
         return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -210,13 +233,20 @@ def exchange_token_view(request):
     action=redeem:  用 code 换取 JWT（无需登录），一次性使用
     """
     action = request.data.get('action', '')
-    redis_client = get_redis()
+
+    try:
+        redis_client = get_redis()
+    except RedisError:
+        return _redis_unavailable_response('授权码交换')
 
     if action == 'create':
         if not request.user.is_authenticated:
             return Response({'error': '未登录'}, status=status.HTTP_401_UNAUTHORIZED)
-        code = str(uuid.uuid4()).replace('-', '')[:8]
-        redis_client.setex(f"exchange:{code}", 60, request.user.id)
+        try:
+            code = str(uuid.uuid4()).replace('-', '')[:8]
+            redis_client.setex(f"exchange:{code}", 60, request.user.id)
+        except RedisError:
+            return _redis_unavailable_response('创建授权码')
         return Response({'code': code})
 
     elif action == 'redeem':
@@ -224,12 +254,20 @@ def exchange_token_view(request):
         if not code:
             return Response({'error': '缺少授权码'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user_id = redis_client.get(f"exchange:{code}")
+        # 用 Lua 脚本原子地 GET+DEL，避免并发请求双次兑换；delete 失败也不会留下有效 code
+        getdel_script = """
+        local v = redis.call('GET', KEYS[1])
+        if v then
+            redis.call('DEL', KEYS[1])
+        end
+        return v
+        """
+        try:
+            user_id = redis_client.eval(getdel_script, 1, f"exchange:{code}")
+        except RedisError:
+            return _redis_unavailable_response('兑换授权码')
         if user_id is None:
             return Response({'error': '授权码无效或已过期'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 立即删除，保证一次性使用
-        redis_client.delete(f"exchange:{code}")
 
         try:
             user = User.objects.get(id=int(user_id))

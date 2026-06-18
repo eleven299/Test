@@ -10,10 +10,13 @@ class UserSimpleSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 
+        fields = ['id', 'username', 'email', 'first_name', 'last_name',
                  'avatar', 'phone', 'department', 'position', 'is_active',
+                 'is_staff', 'is_superuser',
                  'date_joined', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'date_joined', 'created_at', 'updated_at']
+        # is_staff / is_superuser 仅作展示，禁止用户通过 PATCH 自提权限
+        read_only_fields = ['id', 'is_staff', 'is_superuser',
+                            'date_joined', 'created_at', 'updated_at']
 
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)

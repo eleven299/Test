@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db.models.functions import Length
 from .models import (
     RequirementDocument, RequirementAnalysis, BusinessRequirement,
     GeneratedTestCase, AnalysisTask, AIModelConfig, PromptConfig,
@@ -93,10 +94,20 @@ class GenerationConfigAdmin(admin.ModelAdmin):
 
 @admin.register(TestCaseGenerationTask)
 class TestCaseGenerationTaskAdmin(admin.ModelAdmin):
-    list_display = ['task_id', 'title', 'status', 'progress', 'testcase_count', 'output_mode', 'created_at']
+    list_display = ['created_by_name', 'task_id', 'title', 'status', 'progress', 'testcase_count', 'output_mode', 'created_at']
     list_filter = ['status', 'output_mode', 'created_at']
-    search_fields = ['task_id', 'title', 'requirement_text']
+    search_fields = ['task_id', 'title', 'requirement_text', 'created_by__username']
     readonly_fields = ['task_id', 'created_at', 'updated_at']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        # 注入按用例数排序所需的长度字段（用 final_test_cases 长度近似）
+        return qs.annotate(_tc_len=Length('final_test_cases'))
+
+    def created_by_name(self, obj):
+        return obj.created_by.username if obj.created_by else '-'
+    created_by_name.short_description = '用户名'
+    created_by_name.admin_order_field = 'created_by__username'
 
     def testcase_count(self, obj):
         """统计最终测试用例数量（按表格行数，与前端一致）"""
@@ -112,4 +123,5 @@ class TestCaseGenerationTaskAdmin(admin.ModelAdmin):
         if count > 0:
             count -= 1
         return max(count, 0)
-    testcase_count.short_description = '用例数'
+    testcase_count.short_description = 'AI生成用例数'
+    testcase_count.admin_order_field = '_tc_len'

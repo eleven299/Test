@@ -69,10 +69,8 @@ LOCAL_APPS = [
     'apps.app_automation.apps.AppAutomationConfig',  # APP自动化测试
     'apps.core',
     'apps.data_factory',
+    'apps.analytics',
 ]
-
-if ANALYTICS_ENABLED or REGISTRATION_STATS_ENABLED:
-    LOCAL_APPS.append('apps.analytics')
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 

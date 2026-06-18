@@ -11,6 +11,8 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.analytics import views as apps_analytics_views
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
@@ -33,6 +35,8 @@ urlpatterns = [
     path('api/', include('apps.api_testing.urls')),
     path('api/core/', include('apps.core.urls')),
     path('api/data-factory/', include('apps.data_factory.urls')),
+    path('api/analytics/home-card-stats/', apps_analytics_views.HomeCardStatsView.as_view(), name='analytics-home-card-stats'),
+    path('api/analytics/home-card-click/', apps_analytics_views.HomeCardClickView.as_view(), name='analytics-home-card-click'),
 ]
 
 if settings.ANALYTICS_ENABLED:

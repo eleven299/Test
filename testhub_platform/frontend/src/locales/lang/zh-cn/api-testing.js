@@ -255,6 +255,51 @@ export default {
     noAssertions: '暂无断言配置',
     addFirstAssertion: '添加第一个断言',
     referencedToAssertion: '已引用数据工厂数据到断言',
+    // 变量提取
+    extractors: '变量提取',
+    extractorsHint: '从响应中提取变量，供后续请求使用',
+    addExtractor: '添加提取规则',
+    addFirstExtractor: '添加第一条提取规则',
+    extractorName: '变量名',
+    extractorSource: '数据来源',
+    extractorExpression: '表达式',
+    extractorScope: '写入作用域',
+    extractorGroup: '捕获组',
+    extractorDefault: '默认值',
+    extractorNoRecords: '暂无提取规则',
+    extractorSources: {
+      json_body: 'JSON Body (JSONPath)',
+      header: '响应头',
+      status_code: '状态码',
+      regex: '正则匹配',
+      raw_body: '原始响应',
+      xml_body: 'XML Body (XPath)'
+    },
+    extractorScopes: {
+      extracted: '请求间共享 (extracted)',
+      request: '仅本次请求 (request)',
+      global: '全局 (global)'
+    },
+    extractorExpressionHint: {
+      json_body: 'JSONPath 表达式，例如 $.data.token',
+      header: '响应头名称，例如 Content-Type',
+      status_code: '留空即可，自动取状态码',
+      regex: '正则表达式，例如 "token=(\\w+)"',
+      raw_body: '留空即可，取原始响应体',
+      xml_body: 'XPath 表达式，例如 //user/name'
+    },
+    // 执行设置
+    executionSettings: '执行设置',
+    executionSettingsHint: '控制请求的超时、重试与 SSL 校验',
+    requestTimeout: '超时时间(秒)',
+    requestRetryCount: '重试次数',
+    requestRetryInterval: '重试间隔(秒)',
+    skipSslVerify: '跳过 SSL 证书校验',
+    scriptRuntime: '脚本运行时',
+    scriptRuntimes: {
+      python: 'Python (沙箱)',
+      disabled: '不执行脚本'
+    },
     // WebSocket
     messageType: '选择消息类型',
     inputWebSocketMessage: '请输入要发送的WebSocket消息内容',
@@ -356,7 +401,37 @@ export default {
     confirmDeleteSuite: '确定要删除测试套件 "{name}" 吗？',
     confirmRemoveRequest: '确定要移除这个请求吗？',
     selectAtLeastOne: '请选择至少一个请求',
-    assertionDeveloping: '断言编辑功能开发中'
+    assertionDeveloping: '断言编辑功能开发中',
+    // 执行策略
+    executionPolicy: '执行策略',
+    failFast: '快速失败',
+    failFastHint: '关键步骤失败时立即停止套件执行',
+    thinkTime: '思考时间(秒)',
+    thinkTimeHint: '每个请求之间的等待时间',
+    maxConcurrent: '最大并发',
+    maxConcurrentHint: '并发执行请求数量(1=串行)',
+    defaultRetryCount: '默认重试次数',
+    defaultRetryCountHint: '未单独配置时套件内请求的重试次数',
+    // 步骤字段
+    isCritical: '关键步骤',
+    isCriticalHint: '失败时按 fail_fast 策略处理',
+    stepTimeoutOverride: '步骤超时覆盖(秒)',
+    stepTimeoutOverrideHint: '留空则使用请求默认值',
+    // DDT 数据集
+    dataSet: '数据集',
+    dataSetHint: '按行迭代,每行变量将注入到本次请求的迭代作用域',
+    editDataSet: '编辑数据集',
+    addDataSetRow: '添加数据行',
+    clearDataSet: '清空',
+    importDataSet: '导入 JSON',
+    exportDataSet: '导出 JSON',
+    dataSetRowCount: '{n} 行',
+    dataSetEmpty: '空 (单次执行)',
+    dataSetKey: '变量名',
+    dataSetValue: '变量值',
+    dataSetPasteJson: '粘贴 JSON 数组，例如：\n[{"user":"alice","id":1},{"user":"bob","id":2}]',
+    dataSetParseError: 'JSON 解析失败，请检查格式',
+    dataSetConfirmClear: '确定要清空所有数据行吗？'
   },
 
   // 定时任务
@@ -514,7 +589,27 @@ export default {
       completed: '已完成',
       failed: '执行失败',
       cancelled: '已取消'
-    }
+    },
+    stepDetail: '步骤详情',
+    viewStepDetail: '步骤明细',
+    loadingSteps: '加载步骤明细...',
+    noSteps: '该执行暂无步骤级明细数据',
+    stepName: '步骤名称',
+    iteration: '轮次',
+    attempt: '重试次数',
+    statusCode: '状态码',
+    responseTime: '响应时间',
+    assertionsResults: '断言结果',
+    extractedVars: '提取的变量',
+    scriptLogs: '脚本日志',
+    errorMessage: '错误信息',
+    noAssertionsResults: '无断言结果',
+    noExtractedVars: '无提取变量',
+    noScriptLogs: '无脚本日志',
+    passed: '通过',
+    failed: '失败',
+    errored: '错误',
+    skipped: '跳过'
   },
 
   // 通知管理

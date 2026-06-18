@@ -74,6 +74,7 @@
           </div>
           <h3>{{ $t('home.aiCaseGeneration') }}</h3>
           <p>{{ $t('home.aiCaseGenerationDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.ai || 0 }}</span>
         </div>
 
         <!-- 接口测试 -->
@@ -83,6 +84,7 @@
           </div>
           <h3>{{ $t('home.apiTesting') }}</h3>
           <p>{{ $t('home.apiTestingDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.api || 0 }}</span>
         </div>
 
         <!-- UI自动化测试 -->
@@ -92,6 +94,7 @@
           </div>
           <h3>{{ $t('home.uiAutomation') }}</h3>
           <p>{{ $t('home.uiAutomationDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.ui || 0 }}</span>
         </div>
 
         <!-- 数据工厂 -->
@@ -101,6 +104,7 @@
           </div>
           <h3>{{ $t('home.dataFactory') }}</h3>
           <p>{{ $t('home.dataFactoryDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.data || 0 }}</span>
         </div>
 
         <!-- APP自动化测试 -->
@@ -110,6 +114,7 @@
           </div>
           <h3>APP自动化测试</h3>
           <p>基于Airtest的Android APP自动化测试</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.app || 0 }}</span>
         </div>
 
         <!-- AI 智能模式 -->
@@ -119,6 +124,7 @@
           </div>
           <h3>{{ $t('home.aiIntelligentMode') }}</h3>
           <p>{{ $t('home.aiIntelligentModeDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats['ai-intelligent'] || 0 }}</span>
         </div>
         <!-- AI评测师 -->
         <div class="nav-card" @click="handleNavigate('assistant')" role="button" tabindex="0">
@@ -127,6 +133,7 @@
           </div>
           <h3>{{ $t('home.aiEvaluator') }}</h3>
           <p>{{ $t('home.aiEvaluatorDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.assistant || 0 }}</span>
         </div>
         <!-- 配置中心 -->
         <div class="nav-card" @click="handleNavigate('config')" role="button" tabindex="0">
@@ -135,6 +142,7 @@
           </div>
           <h3>{{ $t('home.configCenter') }}</h3>
           <p>{{ $t('home.configCenterDesc') }}</p>
+          <span v-if="isAdmin" class="card-stats">{{ $t('home.clicksCount') }}: {{ cardStats.config || 0 }}</span>
         </div>
       </div>
     </div>
@@ -164,12 +172,13 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { track } from '@/utils/tracker'
+import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick, Link, Monitor, DataLine, Cpu, Setting, ChatDotRound, UserFilled, ArrowDown, Cellphone } from '@element-plus/icons-vue'
 
@@ -184,6 +193,10 @@ const isMobile = ref(false)
 const mobileTipDismissed = ref(false)
 const MOBILE_BREAKPOINT = 768
 const MOBILE_TIP_STORAGE_KEY = 'testhub_home_mobile_tip_seen'
+
+// 卡片点击次数统计（仅 admin 可见）
+const isAdmin = computed(() => userStore.user?.is_staff || userStore.user?.is_superuser || false)
+const cardStats = reactive({})
 
 const dismissMobileTip = () => {
   mobileTipDismissed.value = true
@@ -215,7 +228,34 @@ onMounted(() => {
   }
   updateMobileTip()
   window.addEventListener('resize', updateMobileTip)
+  fetchCardStats()
 })
+
+const fetchCardStats = async () => {
+  if (!isAdmin.value) return
+  try {
+    const { data } = await api.get('/analytics/home-card-stats/')
+    if (data && typeof data === 'object') {
+      Object.keys(data).forEach((key) => {
+        cardStats[key] = data[key]
+      })
+    }
+  } catch {
+    // ignore — endpoint may be unavailable
+  }
+}
+
+const recordCardClick = async (type) => {
+  if (!isAdmin.value) return
+  try {
+    const { data } = await api.post('/analytics/home-card-click/', { card_type: type })
+    if (data && typeof data.click_count === 'number') {
+      cardStats[type] = data.click_count
+    }
+  } catch {
+    // ignore — silently skip on failure
+  }
+}
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateMobileTip)
@@ -275,6 +315,7 @@ const handleNavigate = (type) => {
         card_type: type
       }
     })
+    recordCardClick(type)
     const routeData = router.resolve({ path: routes[type] })
     window.open(routeData.href, '_blank')
   }
@@ -469,6 +510,16 @@ const handleNavigate = (type) => {
     color: #7f8c8d;
     line-height: 1.5;
     margin: 0;
+  }
+
+  .card-stats {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(148, 163, 184, 0.45);
+    font-size: 0.8rem;
+    color: #94a3b8;
+    letter-spacing: 0.3px;
+    user-select: none;
   }
 }
 
@@ -810,6 +861,12 @@ const handleNavigate = (type) => {
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
+    }
+
+    .card-stats {
+      margin-top: 10px;
+      padding-top: 8px;
+      font-size: 11px;
     }
   }
 

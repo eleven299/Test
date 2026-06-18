@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from .models import (
     ApiProject, ApiCollection, ApiRequest, Environment,
     RequestHistory, TestSuite, TestExecution, TestSuiteRequest,
+    TestStepResult,
     ScheduledTask, TaskExecutionLog, NotificationLog,
     TaskNotificationSetting, OperationLog, AIServiceConfig,
 )
@@ -35,7 +36,8 @@ from .serializers import (
     ScheduledTaskSerializer, TaskExecutionLogSerializer,
     NotificationLogSerializer, TaskNotificationSettingSerializer,
     NotificationLogDetailSerializer,
-    TaskNotificationSettingDetailSerializer, OperationLogSerializer
+    TaskNotificationSettingDetailSerializer, OperationLogSerializer,
+    TestStepResultSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -351,204 +353,57 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
-        """执行API请求"""
+        """执行API请求(走 engine.run_single_request)
+
+        支持前端覆盖字段(params/headers/body/method/url/assertions/extractors),
+        便于"编辑未保存即试运行"场景。
+        """
+        from .engine import run_single_request
+
         api_request = self.get_object()
         environment_id = request.data.get('environment_id')
-        
-        try:
-            # 创建变量解析器
-            resolver = VariableResolver()
+        environment = None
+        if environment_id:
+            environment = Environment.objects.filter(id=environment_id).first()
 
-            # 解析环境变量
-            variables = {}
-            if environment_id:
-                env = Environment.objects.get(id=environment_id)
-                variables.update(env.variables)
-            
-            # 使用前端发送的更新后的数据，如果没有则使用数据库中的数据
-            request_params = request.data.get('params', api_request.params)
-            request_headers = request.data.get('headers', api_request.headers)
-            request_body = request.data.get('body', api_request.body)
-            request_method = request.data.get('method', api_request.method)
-            request_url = request.data.get('url', api_request.url)
+        # 前端字段覆盖(仅作用于本次执行,不写库)
+        override_fields = ('params', 'headers', 'body', 'method', 'url',
+                            'assertions', 'extractors', 'pre_request_script',
+                            'post_request_script')
+        for field in override_fields:
+            if field in request.data:
+                setattr(api_request, field, request.data[field])
 
-            # 替换URL中的变量（先解析动态函数，再替换环境变量）
-            url = self._replace_variables(request_url or '', variables)
-            url = resolver.resolve(url)
-            
-            # 准备请求头
-            headers = {}
-            if isinstance(request_headers, list):
-                for header_item in request_headers:
-                    if header_item.get('enabled', True) and header_item.get('key'):
-                        key = header_item['key']
-                        value = self._replace_variables(str(header_item.get('value', '')), variables)
-                        value = resolver.resolve(value)
-                        headers[key] = value
-            else:
-                headers = request_headers.copy() if request_headers else {}
-                for key, value in headers.items():
-                    headers[key] = self._replace_variables(str(value), variables)
-                    headers[key] = resolver.resolve(headers[key])
+        result = run_single_request(
+            api_request=api_request,
+            environment=environment,
+            user=request.user,
+            persist_history=True,
+        )
 
-            # 准备请求参数
-            params = request_params.copy() if request_params else {}
-            for key, value in params.items():
-                params[key] = self._replace_variables(str(value), variables)
-                params[key] = resolver.resolve(params[key])
+        # 记录操作日志
+        log_operation(
+            operation_type='execute',
+            resource_type='request',
+            resource_id=api_request.id,
+            resource_name=api_request.name,
+            user=request.user,
+        )
 
-            # 准备请求体
-            body_data = None
-            body_type = 'none'
-            if request_body and request_method in ['POST', 'PUT', 'PATCH']:
-                body_type = request_body.get('type', 'none')
-                body_content = request_body.get('data')
+        history = result.get('history')
+        if result.get('error') or history is None:
+            # engine 在异常分支已写入 history(含 error_message)
+            payload = RequestHistorySerializer(history).data if history else {}
+            payload['error'] = result.get('error')
+            payload['assertions_results'] = result.get('assertions_results') or []
+            return Response(payload, status=status.HTTP_400_BAD_REQUEST)
 
-                if body_type == 'json':
-                    if isinstance(body_content, dict):
-                        body_data = self._replace_variables_in_dict(body_content, variables)
-                        body_data = self._resolve_variables_in_dict(body_data, resolver)
-                    else:
-                        body_data = body_content
-                elif body_type == 'raw':
-                    if isinstance(body_content, str):
-                        body_data = self._replace_variables(body_content, variables)
-                        body_data = resolver.resolve(body_data)
-                    else:
-                        body_data = body_content
-                elif body_type in ['form-data', 'x-www-form-urlencoded']:
-                    if isinstance(body_content, list):
-                        body_data = self._replace_variables_in_dict(body_content, variables)
-                        body_data = self._resolve_variables_in_dict(body_data, resolver)
-                    else:
-                        body_data = body_content
-                else:
-                    body_data = body_content
-            
-            # 执行请求
-            start_time = time.time()
-
-            # 根据请求体类型决定使用 data 还是 json 参数
-            if body_type == 'raw':
-                # raw 类型使用 data 参数，发送原始字符串
-                response = requests.request(
-                    method=request_method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    data=body_data,
-                    timeout=30
-                )
-            else:
-                # json 类型使用 json 参数，自动序列化
-                response = requests.request(
-                    method=request_method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    json=body_data,
-                    timeout=30
-                )
-            end_time = time.time()
-            
-            response_time = (end_time - start_time) * 1000  # 转换为毫秒
-            
-            # 执行断言验证
-            assertions = request.data.get('assertions', api_request.assertions) or []
-            for assertion in assertions:
-                if assertion.get('type') == 'response_time':
-                    assertion['actual_time'] = response_time
-            assertions_results = execute_assertions(response, assertions)
-            
-            # 保存请求历史
-            history = RequestHistory.objects.create(
-                request=api_request,
-                environment_id=environment_id,
-                request_data={
-                    'url': url,
-                    'method': request_method,
-                    'headers': headers,
-                    'params': params,
-                    'body': body_data
-                },
-                response_data={
-                    'headers': dict(response.headers),
-                    'body': response.text,
-                    'json': response.json() if response.headers.get('content-type', '').startswith('application/json') else None
-                },
-                status_code=response.status_code,
-                response_time=response_time,
-                executed_by=request.user
-            )
-            
-            # 记录执行操作
-            log_operation(
-                operation_type='execute',
-                resource_type='request',
-                resource_id=api_request.id,
-                resource_name=api_request.name,
-                user=request.user
-            )
-            
-            # 返回包含断言结果的数据
-            history_data = RequestHistorySerializer(history).data
-            history_data['assertions_results'] = assertions_results
-            
-            return Response(history_data)
-            
-        except Exception as e:
-            # 保存错误历史
-            history = RequestHistory.objects.create(
-                request=api_request,
-                environment_id=environment_id,
-                request_data={
-                    'url': api_request.url,
-                    'method': api_request.method,
-                    'headers': api_request.headers,
-                    'params': api_request.params,
-                    'body': api_request.body
-                },
-                error_message=str(e),
-                executed_by=request.user
-            )
-            
-            return Response(RequestHistorySerializer(history).data, status=status.HTTP_400_BAD_REQUEST)
-    
-    def _replace_variables(self, text, variables):
-        """替换文本中的变量"""
-        if not isinstance(text, str):
-            return text
-        
-        result = text
-        for key, value in (variables or {}).items():
-            if isinstance(value, dict):
-                replacement = str(value.get('currentValue', '') or value.get('initialValue', ''))
-            else:
-                replacement = str(value) if value is not None else ''
-            result = result.replace(f'{{{{{key}}}}}', replacement)
-        return result
-    
-    def _replace_variables_in_dict(self, data, variables):
-        """递归替换字典中的变量"""
-        if isinstance(data, dict):
-            return {k: self._replace_variables_in_dict(v, variables) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self._replace_variables_in_dict(item, variables) for item in data]
-        elif isinstance(data, str):
-            return self._replace_variables(data, variables)
-        else:
-            return data
-
-    def _resolve_variables_in_dict(self, data, resolver):
-        """递归解析字典中的动态函数占位符"""
-        if isinstance(data, dict):
-            return {k: self._resolve_variables_in_dict(v, resolver) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self._resolve_variables_in_dict(item, resolver) for item in data]
-        elif isinstance(data, str):
-            return resolver.resolve(data)
-        else:
-            return data
+        history_data = RequestHistorySerializer(history).data
+        history_data['assertions_results'] = result.get('assertions_results') or []
+        history_data['response_data'] = result.get('response_data')
+        history_data['status_code'] = result.get('status_code')
+        history_data['response_time'] = result.get('response_time')
+        return Response(history_data)
 
 
 class EnvironmentViewSet(viewsets.ModelViewSet):
@@ -680,195 +535,43 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
-        """执行测试套件"""
+        """执行测试套件(走 TestExecutionEngine)
+
+        请求体可选参数:
+            environment_id  覆盖套件默认环境
+            trigger_source  触发来源(manual / schedule / cli / ci),默认 manual
+        """
+        from .engine import TestExecutionEngine
+
         test_suite = self.get_object()
-        
+        environment = test_suite.environment
+        env_id = request.data.get('environment_id')
+        if env_id:
+            environment = Environment.objects.filter(id=env_id).first() or environment
+
+        trigger_source = request.data.get('trigger_source') or 'manual'
+
+        engine = TestExecutionEngine(
+            test_suite=test_suite,
+            environment=environment,
+            user=request.user,
+            trigger_source=trigger_source,
+            persist_history=True,
+        )
         try:
-            # 创建执行记录
-            execution = TestExecution.objects.create(
-                test_suite=test_suite,
-                status='RUNNING',
-                start_time=timezone.now(),
-                executed_by=request.user
-            )
-            
-            # 获取套件中的请求
-            suite_requests = TestSuiteRequest.objects.filter(
-                test_suite=test_suite,
-                enabled=True
-            ).order_by('order')
-            
-            execution.total_requests = suite_requests.count()
-            execution.save()
-            
-            results = []
-            passed_count = 0
-            failed_count = 0
-            
-            # 创建变量解析器
-            resolver = VariableResolver()
-
-            # 执行每个请求
-            for suite_request in suite_requests:
-                api_request = suite_request.request
-                
-                try:
-                    # 解析环境变量
-                    variables = {}
-                    if test_suite.environment:
-                        variables.update(test_suite.environment.variables)
-                    
-                    # 替换URL中的变量（先解析动态函数，再替换环境变量）
-                    url = self._replace_variables(api_request.url, variables)
-                    url = resolver.resolve(url)
-
-                    # 准备请求头
-                    headers = {}
-                    # 支持新的数组格式和旧的对象格式
-                    if isinstance(api_request.headers, list):
-                        # 新的数组格式 [{"key": "Authorization", "value": "Bearer {{token}}", "enabled": true, "description": "..."}]
-                        for header_item in api_request.headers:
-                            if header_item.get('enabled', True) and header_item.get('key'):
-                                key = header_item['key']
-                                value = self._replace_variables(str(header_item.get('value', '')), variables)
-                                value = resolver.resolve(value)
-                                headers[key] = value
-                    else:
-                        # 旧的对象格式 {"Authorization": "Bearer {{token}}"}
-                        headers = api_request.headers.copy()
-                        for key, value in headers.items():
-                            headers[key] = self._replace_variables(str(value), variables)
-                            headers[key] = resolver.resolve(headers[key])
-
-                    params = api_request.params.copy()
-                    for key, value in params.items():
-                        params[key] = self._replace_variables(str(value), variables)
-                        params[key] = resolver.resolve(params[key])
-
-                    body_data = None
-                    if api_request.body and api_request.method in ['POST', 'PUT', 'PATCH']:
-                        if api_request.body.get('type') == 'json':
-                            body_data = api_request.body.get('data', {})
-                            body_data = self._replace_variables_in_dict(body_data, variables)
-                            body_data = self._resolve_variables_in_dict(body_data, resolver)
-
-                    # 执行请求
-                    start_time = time.time()
-                    response = requests.request(
-                        method=api_request.method,
-                        url=url,
-                        headers=headers,
-                        params=params,
-                        json=body_data,
-                        timeout=30
-                    )
-                    end_time = time.time()
-                    response_time = (end_time - start_time) * 1000
-                    
-                    # 执行断言验证
-                    assertions = api_request.assertions or []
-                    # 添加响应时间到断言中
-                    for assertion in assertions:
-                        if assertion.get('type') == 'response_time':
-                            assertion['actual_time'] = response_time
-                    
-                    # 使用共享的断言执行方法
-                    assertions_results = execute_assertions(response, assertions)
-                    
-                    # 检查所有断言是否通过
-                    passed = True
-                    error_message = ''
-                    
-                    # 检查套件请求的断言
-                    for assertion in suite_request.assertions:
-                        # 简单的状态码断言
-                        if assertion.get('type') == 'status_code':
-                            expected = assertion.get('value')
-                            if response.status_code != expected:
-                                passed = False
-                                error_message = f'状态码断言失败: 期望 {expected}, 实际 {response.status_code}'
-                                break
-                    
-                    # 检查接口自身的断言
-                    if passed and assertions_results:
-                        for assertion_result in assertions_results:
-                            if not assertion_result.get('passed', True):
-                                passed = False
-                                error_message = f"断言失败: {assertion_result.get('name', '未命名断言')} - {assertion_result.get('error', '断言不通过')}"
-                                break
-                    
-                    if passed:
-                        passed_count += 1
-                    else:
-                        failed_count += 1
-                    
-                    results.append({
-                        'name': api_request.name,
-                        'method': api_request.method,
-                        'url': url,
-                        'status_code': response.status_code,
-                        'response_time': response_time,
-                        'passed': passed,
-                        'error': error_message,
-                        'assertions_results': assertions_results
-                    })
-                    
-                    # 保存请求历史
-                    RequestHistory.objects.create(
-                        request=api_request,
-                        environment=test_suite.environment,
-                        request_data={
-                            'url': url,
-                            'method': api_request.method,
-                            'headers': headers,
-                            'params': params,
-                            'body': body_data
-                        },
-                        response_data={
-                            'headers': dict(response.headers),
-                            'body': response.text,
-                            'json': response.json() if response.headers.get('content-type', '').startswith('application/json') else None
-                        },
-                        status_code=response.status_code,
-                        response_time=response_time,
-                        assertions_results=assertions_results,
-                        executed_by=request.user
-                    )
-                    
-                except Exception as e:
-                    failed_count += 1
-                    results.append({
-                        'name': api_request.name,
-                        'method': api_request.method,
-                        'url': api_request.url,
-                        'passed': False,
-                        'error': str(e)
-                    })
-            
-            # 更新执行结果
-            execution.end_time = timezone.now()
-            execution.passed_requests = passed_count
-            execution.failed_requests = failed_count
-            execution.status = 'COMPLETED' if failed_count == 0 else 'FAILED'
-            execution.results = results
-            execution.save()
-            
-            # 记录执行操作
-            log_operation(
-                operation_type='execute',
-                resource_type='suite',
-                resource_id=test_suite.id,
-                resource_name=test_suite.name,
-                user=request.user
-            )
-            
-            return Response(TestExecutionSerializer(execution).data)
-            
+            execution = engine.run()
         except Exception as e:
-            execution.status = 'FAILED'
-            execution.end_time = timezone.now()
-            execution.save()
+            logger.exception("套件执行异常")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        log_operation(
+            operation_type='execute',
+            resource_type='suite',
+            resource_id=test_suite.id,
+            resource_name=test_suite.name,
+            user=request.user,
+        )
+        return Response(TestExecutionSerializer(execution).data)
 
     def perform_create(self, serializer):
         """创建测试套件时记录日志"""
@@ -926,42 +629,6 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    
-    def _replace_variables(self, text, variables):
-        """替换文本中的变量"""
-        if not isinstance(text, str):
-            return text
-        
-        result = text
-        for key, value in (variables or {}).items():
-            if isinstance(value, dict):
-                replacement = str(value.get('currentValue', '') or value.get('initialValue', ''))
-            else:
-                replacement = str(value) if value is not None else ''
-            result = result.replace(f'{{{{{key}}}}}', replacement)
-        return result
-    
-    def _replace_variables_in_dict(self, data, variables):
-        """递归替换字典中的变量"""
-        if isinstance(data, dict):
-            return {k: self._replace_variables_in_dict(v, variables) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self._replace_variables_in_dict(item, variables) for item in data]
-        elif isinstance(data, str):
-            return self._replace_variables(data, variables)
-        else:
-            return data
-    
-    def _resolve_variables_in_dict(self, data, resolver):
-        """递归解析字典中的动态函数占位符"""
-        if isinstance(data, dict):
-            return {k: self._resolve_variables_in_dict(v, resolver) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self._resolve_variables_in_dict(item, resolver) for item in data]
-        elif isinstance(data, str):
-            return resolver.resolve(data)
-        else:
-            return data
 
 
 class TestSuiteRequestViewSet(viewsets.ModelViewSet):
@@ -1548,6 +1215,19 @@ class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
             import traceback
             logger.error(f"生成测试结果文件失败: {str(e)}\n{traceback.format_exc()}")
             raise
+
+    @action(detail=True, methods=['get'], url_path='step-results')
+    def step_results(self, request, pk=None):
+        """返回某次执行下所有步骤级结果（断言/提取/脚本日志/重试次数）"""
+        execution = self.get_object()
+        steps = TestStepResult.objects.filter(execution=execution).select_related(
+            'request', 'suite_request'
+        ).order_by('started_at', 'id')
+        serializer = TestStepResultSerializer(steps, many=True)
+        return Response({
+            'count': steps.count(),
+            'results': serializer.data,
+        })
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):

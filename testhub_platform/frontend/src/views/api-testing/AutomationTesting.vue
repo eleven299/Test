@@ -128,6 +128,39 @@
                   />
                 </template>
               </el-table-column>
+              <el-table-column :label="$t('apiTesting.automation.isCritical')" width="100">
+                <template #default="scope">
+                  <el-tooltip :content="$t('apiTesting.automation.isCriticalHint')" placement="top">
+                    <el-switch
+                      v-model="scope.row.is_critical"
+                      @change="updateStepField(scope.row, 'is_critical')"
+                    />
+                  </el-tooltip>
+                </template>
+              </el-table-column>
+              <el-table-column :label="$t('apiTesting.automation.stepTimeoutOverride')" width="160">
+                <template #default="scope">
+                  <el-tooltip :content="$t('apiTesting.automation.stepTimeoutOverrideHint')" placement="top">
+                    <el-input-number
+                      v-model="scope.row.timeout_override"
+                      :min="1"
+                      :max="600"
+                      size="small"
+                      controls-position="right"
+                      style="width: 130px"
+                      @change="updateStepField(scope.row, 'timeout_override')"
+                    />
+                  </el-tooltip>
+                </template>
+              </el-table-column>
+              <el-table-column :label="$t('apiTesting.automation.dataSet')" width="120">
+                <template #default="scope">
+                  <el-button link type="primary" size="small" @click="openDataSetDialog(scope.row)">
+                    <el-icon><DataAnalysis /></el-icon>
+                    {{ dataSetLabel(scope.row.data_set) }}
+                  </el-button>
+                </template>
+              </el-table-column>
               <el-table-column :label="$t('apiTesting.automation.assertions')" width="100">
                 <template #default="scope">
                   {{ $t('apiTesting.automation.assertionCount', { n: scope.row.assertions?.length || 0 }) }}
@@ -246,6 +279,32 @@
               :value="env.id"
             />
           </el-select>
+        </el-form-item>
+
+        <el-divider content-position="left">{{ $t('apiTesting.automation.executionPolicy') }}</el-divider>
+
+        <el-form-item :label="$t('apiTesting.automation.failFast')">
+          <el-tooltip :content="$t('apiTesting.automation.failFastHint')" placement="top">
+            <el-switch v-model="suiteForm.fail_fast" />
+          </el-tooltip>
+        </el-form-item>
+
+        <el-form-item :label="$t('apiTesting.automation.thinkTime')">
+          <el-tooltip :content="$t('apiTesting.automation.thinkTimeHint')" placement="top">
+            <el-input-number v-model="suiteForm.think_time" :min="0" :max="60" :step="0.5" />
+          </el-tooltip>
+        </el-form-item>
+
+        <el-form-item :label="$t('apiTesting.automation.maxConcurrent')">
+          <el-tooltip :content="$t('apiTesting.automation.maxConcurrentHint')" placement="top">
+            <el-input-number v-model="suiteForm.max_concurrent" :min="1" :max="50" />
+          </el-tooltip>
+        </el-form-item>
+
+        <el-form-item :label="$t('apiTesting.automation.defaultRetryCount')">
+          <el-tooltip :content="$t('apiTesting.automation.defaultRetryCountHint')" placement="top">
+            <el-input-number v-model="suiteForm.default_retry_count" :min="0" :max="10" />
+          </el-tooltip>
         </el-form-item>
       </el-form>
 
@@ -398,7 +457,11 @@ const suiteForm = reactive({
   name: '',
   description: '',
   project: null,
-  environment: null
+  environment: null,
+  fail_fast: false,
+  think_time: 0,
+  max_concurrent: 1,
+  default_retry_count: 0
 })
 
 const suiteRules = computed(() => ({
@@ -686,6 +749,10 @@ const editSuite = (suite) => {
   suiteForm.project = suite.project
   // 修复：environment字段直接是ID，不需要?.id
   suiteForm.environment = suite.environment || null
+  suiteForm.fail_fast = !!suite.fail_fast
+  suiteForm.think_time = suite.think_time ?? 0
+  suiteForm.max_concurrent = suite.max_concurrent ?? 1
+  suiteForm.default_retry_count = suite.default_retry_count ?? 0
   showCreateSuiteDialog.value = true
 }
 
@@ -762,7 +829,11 @@ const resetSuiteForm = () => {
     name: '',
     description: '',
     project: selectedProject.value,
-    environment: null
+    environment: null,
+    fail_fast: false,
+    think_time: 0,
+    max_concurrent: 1,
+    default_retry_count: 0
   })
   suiteFormRef.value?.resetFields()
 }
@@ -829,6 +900,15 @@ const updateRequestEnabled = async (suiteRequest) => {
   } catch (error) {
     ElMessage.error(t('apiTesting.messages.error.updateFailed'))
     suiteRequest.enabled = !suiteRequest.enabled
+  }
+}
+
+const updateStepField = async (suiteRequest, field) => {
+  const payload = { [field]: suiteRequest[field] }
+  try {
+    await api.put(`/api-testing/test-suite-requests/${suiteRequest.id}/`, payload)
+  } catch (error) {
+    ElMessage.error(t('apiTesting.messages.error.updateFailed'))
   }
 }
 

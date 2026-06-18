@@ -17,7 +17,7 @@ export default {
   testPlan: '测试计划',
   activePlans: '活跃计划',
   progress: '进度',
-  totalCases: '用例总数',
+  totalCases: 'AI 生成用例',
   passRate: '通过率',
   failedCases: '失败用例',
   defectsFound: '发现缺陷',

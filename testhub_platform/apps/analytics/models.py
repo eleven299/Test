@@ -52,3 +52,21 @@ class RegistrationStats(User):
         proxy = True
         verbose_name = '注册统计'
         verbose_name_plural = '注册统计'
+
+
+class HomeCardClickStat(models.Model):
+    """首页各模块卡片点击次数统计（独立于 ANALYTICS_ENABLED）"""
+
+    card_type = models.CharField(max_length=32, unique=True, verbose_name='卡片类型')
+    click_count = models.PositiveIntegerField(default=0, verbose_name='点击次数')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'home_card_click_stats'
+        verbose_name = '首页卡片点击统计'
+        verbose_name_plural = '首页卡片点击统计'
+        ordering = ['card_type']
+
+    def __str__(self):
+        return f'{self.card_type}: {self.click_count}'

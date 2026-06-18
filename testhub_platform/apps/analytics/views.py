@@ -1,12 +1,14 @@
 import logging
 
 from django.conf import settings
+from django.db import transaction
+from django.db.models import F
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AnalyticsEvent
+from .models import AnalyticsEvent, HomeCardClickStat
 from .serializers import AnalyticsEventCreateSerializer
 
 logger = logging.getLogger(__name__)
@@ -67,3 +69,38 @@ class AnalyticsEventIngestView(APIView):
             return Response({'detail': '写入埋点事件失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({'created': len(instances)}, status=status.HTTP_201_CREATED)
+
+
+class HomeCardStatsView(APIView):
+    """首页各模块卡片点击次数统计"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = HomeCardClickStat.objects.values('card_type', 'click_count')
+        return Response({row['card_type']: row['click_count'] for row in rows})
+
+
+class HomeCardClickView(APIView):
+    """记录首页卡片点击，按 card_type 自增"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        card_type = request.data.get('card_type')
+        if not card_type or not isinstance(card_type, str):
+            return Response({'detail': 'card_type 不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+        card_type = card_type.strip()[:32]
+        if not card_type:
+            return Response({'detail': 'card_type 不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            obj, created = HomeCardClickStat.objects.get_or_create(card_type=card_type)
+            if created:
+                obj.click_count = 1
+            else:
+                obj.click_count = F('click_count') + 1
+            obj.save(update_fields=['click_count'])
+            obj.refresh_from_db(fields=['click_count'])
+
+        return Response({'card_type': card_type, 'click_count': obj.click_count})

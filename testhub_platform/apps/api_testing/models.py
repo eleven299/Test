@@ -94,6 +94,23 @@ class ApiRequest(models.Model):
     pre_request_script = models.TextField(blank=True, verbose_name='请求前脚本')
     post_request_script = models.TextField(blank=True, verbose_name='请求后脚本')
     assertions = models.JSONField(default=list, verbose_name='断言规则')
+
+    # —— 执行控制(P0 增强) ——
+    timeout = models.IntegerField(default=30, verbose_name='超时时间(秒)')
+    retry_count = models.IntegerField(default=0, verbose_name='失败重试次数')
+    retry_interval = models.IntegerField(default=1, verbose_name='重试间隔(秒)')
+    skip_ssl_verify = models.BooleanField(default=False, verbose_name='跳过SSL证书校验')
+
+    # —— 变量提取规则(声明式,替代部分 post_request_script 职责) ——
+    extractors = models.JSONField(default=list, verbose_name='变量提取规则',
+                                  help_text='从响应中提取变量供后续请求使用')
+
+    # —— 脚本运行时 ——
+    script_runtime = models.CharField(
+        max_length=20, choices=[('python', 'Python'), ('javascript', 'JavaScript')],
+        default='python', verbose_name='脚本运行时'
+    )
+
     order = models.IntegerField(default=0, verbose_name='排序')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='创建者')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
@@ -170,6 +187,17 @@ class TestSuite(models.Model):
                                     verbose_name='执行环境')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='api_test_suites',
                                    verbose_name='创建者')
+
+    # —— 执行策略(P0 增强) ——
+    fail_fast = models.BooleanField(default=False, verbose_name='失败即停止',
+                                    help_text='关键步骤失败时立即停止整个套件')
+    think_time = models.IntegerField(default=0, verbose_name='请求间隔(毫秒)',
+                                     help_text='请求之间的等待时间,模拟真实用户')
+    max_concurrent = models.IntegerField(default=1, verbose_name='最大并发数',
+                                         help_text='1 表示串行执行')
+    default_retry_count = models.IntegerField(default=0, verbose_name='默认重试次数',
+                                              help_text='套件级默认值,被请求级 retry_count 覆盖')
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -190,6 +218,16 @@ class TestSuiteRequest(models.Model):
     order = models.IntegerField(default=0, verbose_name='执行顺序')
     assertions = models.JSONField(default=list, verbose_name='断言规则')
     enabled = models.BooleanField(default=True, verbose_name='是否启用')
+
+    # —— 步骤级控制(P0 增强) ——
+    is_critical = models.BooleanField(default=False, verbose_name='关键步骤',
+                                      help_text='关键步骤失败时触发 fail_fast')
+    timeout_override = models.IntegerField(default=0, verbose_name='步骤超时覆盖(秒)',
+                                            help_text='0 表示使用请求默认超时')
+
+    # —— DDT 数据驱动(P2) ——
+    data_set = models.JSONField(default=list, verbose_name='数据集',
+                                help_text='DDT 迭代数据,每行一个 dict;空列表表示单次执行(无迭代)')
 
     class Meta:
         db_table = 'api_test_suite_requests'
@@ -221,7 +259,18 @@ class TestExecution(models.Model):
     total_requests = models.IntegerField(default=0, verbose_name='总请求数')
     passed_requests = models.IntegerField(default=0, verbose_name='通过请求数')
     failed_requests = models.IntegerField(default=0, verbose_name='失败请求数')
-    results = models.JSONField(default=dict, verbose_name='执行结果')
+    results = models.JSONField(default=dict, verbose_name='执行结果',
+                               help_text='历史兼容字段;新数据请用 TestStepResult 查询')
+
+    # —— P0 增强 ——
+    environment_snapshot = models.JSONField(default=dict, verbose_name='环境变量快照',
+                                            help_text='执行时的环境变量快照,避免后续修改影响报告')
+    trigger_source = models.CharField(max_length=20, choices=[
+        ('manual', '手动'), ('schedule', '定时'), ('cli', '命令行'), ('ci', 'CI'),
+    ], default='manual', verbose_name='触发来源')
+    stop_reason = models.TextField(blank=True, verbose_name='停止原因',
+                                    help_text='fail_fast 或异常停止时的原因')
+
     executed_by = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='执行者')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
@@ -233,6 +282,68 @@ class TestExecution(models.Model):
 
     def __str__(self):
         return f"{self.test_suite.name} - {self.created_at}"
+
+
+class TestStepResult(models.Model):
+    """测试步骤执行结果(P0 新增)
+
+    将原 TestExecution.results JSON 中的步骤数据拆为可查询的表,
+    支持按状态、接口、迭代序号等维度做统计与索引。
+    """
+    STEP_STATUS_CHOICES = [
+        ('passed', '通过'),
+        ('failed', '失败'),
+        ('skipped', '跳过'),
+        ('error', '错误'),
+    ]
+
+    execution = models.ForeignKey(TestExecution, on_delete=models.CASCADE,
+                                  related_name='step_results', verbose_name='执行记录')
+    suite_request = models.ForeignKey(TestSuiteRequest, on_delete=models.SET_NULL,
+                                      null=True, blank=True, verbose_name='套件请求')
+    request = models.ForeignKey(ApiRequest, on_delete=models.SET_NULL,
+                                 null=True, blank=True, verbose_name='接口请求')
+
+    # 步骤基本信息
+    request_name = models.CharField(max_length=200, blank=True, verbose_name='请求名称快照')
+    method = models.CharField(max_length=10, blank=True, verbose_name='请求方法快照')
+    url = models.TextField(blank=True, verbose_name='请求URL快照')
+
+    # 迭代信息(为 DDT 预留,P0 阶段固定为 0)
+    iteration = models.IntegerField(default=0, verbose_name='迭代序号')
+
+    # 结果
+    status = models.CharField(max_length=20, choices=STEP_STATUS_CHOICES, default='error',
+                              verbose_name='状态')
+    status_code = models.IntegerField(null=True, blank=True, verbose_name='HTTP状态码')
+    response_time = models.FloatField(null=True, blank=True, verbose_name='响应时间(ms)')
+
+    # 重试统计
+    attempt = models.IntegerField(default=1, verbose_name='尝试次数')
+
+    # 详细数据(快照)
+    request_snapshot = models.JSONField(default=dict, verbose_name='请求快照')
+    response_snapshot = models.JSONField(default=dict, verbose_name='响应快照')
+    assertions_results = models.JSONField(default=list, verbose_name='断言结果')
+    extracted_vars = models.JSONField(default=dict, verbose_name='本次提取的变量')
+    script_logs = models.JSONField(default=list, verbose_name='脚本日志')
+    error_message = models.TextField(blank=True, verbose_name='错误信息')
+
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name='开始时间')
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
+
+    class Meta:
+        db_table = 'api_test_step_results'
+        verbose_name = '步骤结果'
+        verbose_name_plural = '步骤结果'
+        ordering = ['iteration', 'started_at']
+        indexes = [
+            models.Index(fields=['execution', 'status']),
+            models.Index(fields=['request', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.request_name or '(未命名)'} - {self.get_status_display()}"
 
 
 # 定时任务相关模型

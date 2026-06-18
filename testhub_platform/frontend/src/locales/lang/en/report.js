@@ -17,7 +17,7 @@ export default {
   testPlan: 'Test Plan',
   activePlans: 'Active Plans',
   progress: 'Progress',
-  totalCases: 'Total Cases',
+  totalCases: 'AI Generated Cases',
   passRate: 'Pass Rate',
   failedCases: 'Failed Cases',
   defectsFound: 'Defects Found',

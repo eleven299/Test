@@ -162,6 +162,11 @@ export default {
 
     // Filters
     statusFilter: '状态筛选:',
+    usernameSearch: '用户名搜索:',
+    usernamePlaceholder: '请输入用户名，回车搜索',
+    scopeLabel: '数据范围:',
+    scopeMine: '我的任务',
+    scopeAll: '全部用户',
     allStatus: '全部状态',
     pending: '需求分析中',
     generating: '用例编写中',
@@ -194,6 +199,7 @@ export default {
     failedCount: '失败',
 
     // Table Headers
+    username: '用户名',
     serialNumber: '序号',
     taskId: '任务ID',
     relatedRequirement: '关联需求',
@@ -233,6 +239,7 @@ export default {
     jumpTo: '跳转到:',
     pageNumber: '页码',
     jump: '跳转',
+    invalidPage: '请输入 1-{max} 之间的页码',
     paginationInfo: '显示 {start}-{end} 条，共 {total} 条',
 
     // Detail Modal

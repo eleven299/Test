@@ -263,6 +263,51 @@ export default {
     noAssertions: 'No assertions configured',
     addFirstAssertion: 'Add first assertion',
     referencedToAssertion: 'Referenced data factory data to assertion',
+    // Variable Extractors
+    extractors: 'Variable Extractors',
+    extractorsHint: 'Extract variables from the response for use in later requests',
+    addExtractor: 'Add Extractor',
+    addFirstExtractor: 'Add first extractor',
+    extractorName: 'Variable Name',
+    extractorSource: 'Source',
+    extractorExpression: 'Expression',
+    extractorScope: 'Target Scope',
+    extractorGroup: 'Regex Group',
+    extractorDefault: 'Default Value',
+    extractorNoRecords: 'No extractors configured',
+    extractorSources: {
+      json_body: 'JSON Body (JSONPath)',
+      header: 'Response Header',
+      status_code: 'Status Code',
+      regex: 'Regex Match',
+      raw_body: 'Raw Body',
+      xml_body: 'XML Body (XPath)'
+    },
+    extractorScopes: {
+      extracted: 'Shared across requests (extracted)',
+      request: 'Current request only (request)',
+      global: 'Global (global)'
+    },
+    extractorExpressionHint: {
+      json_body: 'JSONPath expression, e.g. $.data.token',
+      header: 'Header name, e.g. Content-Type',
+      status_code: 'Leave empty; status code is captured automatically',
+      regex: 'Regex pattern, e.g. "token=(\\w+)"',
+      raw_body: 'Leave empty; raw response body is captured',
+      xml_body: 'XPath expression, e.g. //user/name'
+    },
+    // Execution Settings
+    executionSettings: 'Execution Settings',
+    executionSettingsHint: 'Control timeout, retry and SSL verification',
+    requestTimeout: 'Timeout (seconds)',
+    requestRetryCount: 'Retry Count',
+    requestRetryInterval: 'Retry Interval (seconds)',
+    skipSslVerify: 'Skip SSL Certificate Verification',
+    scriptRuntime: 'Script Runtime',
+    scriptRuntimes: {
+      python: 'Python (sandboxed)',
+      disabled: 'Do not execute scripts'
+    },
     // Context Menu
     contextMenu: {
       addRequest: 'Add Request',
@@ -345,7 +390,37 @@ export default {
     confirmDeleteSuite: 'Are you sure to delete test suite "{name}"?',
     confirmRemoveRequest: 'Are you sure to remove this request?',
     selectAtLeastOne: 'Please select at least one request',
-    assertionDeveloping: 'Assertion editing feature is under development'
+    assertionDeveloping: 'Assertion editing feature is under development',
+    // Execution Policy
+    executionPolicy: 'Execution Policy',
+    failFast: 'Fail Fast',
+    failFastHint: 'Stop the suite immediately when a critical step fails',
+    thinkTime: 'Think Time (s)',
+    thinkTimeHint: 'Wait time between consecutive requests',
+    maxConcurrent: 'Max Concurrency',
+    maxConcurrentHint: 'Number of requests to run in parallel (1 = serial)',
+    defaultRetryCount: 'Default Retry Count',
+    defaultRetryCountHint: 'Used when a request does not override it',
+    // Step fields
+    isCritical: 'Critical',
+    isCriticalHint: 'Failure is subject to fail_fast policy',
+    stepTimeoutOverride: 'Timeout Override (s)',
+    stepTimeoutOverrideHint: 'Leave empty to use request default',
+    // DDT data set
+    dataSet: 'Data Set',
+    dataSetHint: 'Iterates per row; each row injects variables into the iteration scope',
+    editDataSet: 'Edit Data Set',
+    addDataSetRow: 'Add Row',
+    clearDataSet: 'Clear',
+    importDataSet: 'Import JSON',
+    exportDataSet: 'Export JSON',
+    dataSetRowCount: '{n} rows',
+    dataSetEmpty: 'empty (single run)',
+    dataSetKey: 'Variable',
+    dataSetValue: 'Value',
+    dataSetPasteJson: 'Paste a JSON array, e.g.:\n[{"user":"alice","id":1},{"user":"bob","id":2}]',
+    dataSetParseError: 'Failed to parse JSON, please check the format',
+    dataSetConfirmClear: 'Clear all data rows?'
   },
 
   // Scheduled Tasks
@@ -503,7 +578,27 @@ export default {
       completed: 'Completed',
       failed: 'Failed',
       cancelled: 'Cancelled'
-    }
+    },
+    stepDetail: 'Step Detail',
+    viewStepDetail: 'Step Details',
+    loadingSteps: 'Loading steps...',
+    noSteps: 'No step-level detail data for this execution',
+    stepName: 'Step Name',
+    iteration: 'Iteration',
+    attempt: 'Attempt',
+    statusCode: 'Status Code',
+    responseTime: 'Response Time',
+    assertionsResults: 'Assertions',
+    extractedVars: 'Extracted Variables',
+    scriptLogs: 'Script Logs',
+    errorMessage: 'Error',
+    noAssertionsResults: 'No assertion results',
+    noExtractedVars: 'No extracted variables',
+    noScriptLogs: 'No script logs',
+    passed: 'Passed',
+    failed: 'Failed',
+    errored: 'Errored',
+    skipped: 'Skipped'
   },
 
   // Notification Management
