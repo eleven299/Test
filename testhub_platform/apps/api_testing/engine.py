@@ -380,10 +380,10 @@ class TestExecutionEngine:
     def _run_steps(self, execution: TestExecution) -> None:
         steps = list(TestSuiteRequest.objects.filter(
             test_suite=self.test_suite, enabled=True
-        ).select_related('request').order_by('order'))
+        ).select_related('request', 'dataset').order_by('order'))
 
         # 计算含 DDT 迭代的总请求数
-        expanded_counts = [len(self._normalize_data_set(s.data_set)) for s in steps]
+        expanded_counts = [len(self._normalize_data_set(self._resolve_step_data_set(s))) for s in steps]
         self.total_count = sum(expanded_counts) if expanded_counts else 0
         execution.total_requests = self.total_count
         execution.save()
@@ -398,9 +398,10 @@ class TestExecutionEngine:
                 self._mark_skipped(execution, step)
                 continue
 
-            # DDT: data_set 为空数组时单次执行(iteration=0)
+            # DDT: dataset 优先于内联 data_set;都为空时单次执行(iteration=0)
             # 非空时按行迭代,每行 push 一次 iteration scope
-            data_rows = self._normalize_data_set(step.data_set)
+            resolved_data_set = self._resolve_step_data_set(step)
+            data_rows = self._normalize_data_set(resolved_data_set)
 
             for iter_idx, row_vars in enumerate(data_rows):
                 if self.stop_requested:
@@ -455,6 +456,21 @@ class TestExecutionEngine:
             else:
                 normalized.append({'value': row})
         return normalized
+
+    @staticmethod
+    def _resolve_step_data_set(step: TestSuiteRequest):
+        """合并步骤的独立数据集与内联数据集。
+
+        合并语义:
+        - dataset FK 非空且 data 非空 → 用 dataset.data
+        - dataset.data 为空 → 退回 inline data_set
+        - dataset FK 为空 → 用 inline data_set
+        - 两者都为空 → 返回 None(由 _normalize_data_set 视为单次执行)
+        """
+        dataset = getattr(step, 'dataset', None)
+        if dataset is not None and isinstance(dataset.data, list) and len(dataset.data) > 0:
+            return dataset.data
+        return step.data_set
 
     def _run_step(self, execution: TestExecution, step: TestSuiteRequest,
                    default_retry: int, iteration: int = 0) -> TestStepResult:

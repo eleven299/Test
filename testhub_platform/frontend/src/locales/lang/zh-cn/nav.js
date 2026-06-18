@@ -33,6 +33,7 @@ export default {
     automationTesting: '自动化测试',
     requestHistory: '请求历史',
     environmentManagement: '环境管理',
+    datasetManagement: '数据集管理',
     scheduledTasks: '定时任务',
     notificationList: '通知列表',
 

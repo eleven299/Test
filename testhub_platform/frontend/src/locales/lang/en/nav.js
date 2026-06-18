@@ -33,6 +33,7 @@ export default {
     automationTesting: 'Automation Testing',
     requestHistory: 'Request History',
     environmentManagement: 'Environment Management',
+    datasetManagement: 'Datasets',
     scheduledTasks: 'Scheduled Tasks',
     notificationList: 'Notification List',
 

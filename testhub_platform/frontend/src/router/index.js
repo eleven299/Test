@@ -15,6 +15,7 @@ import ApiInterfaceManagement from '@/views/api-testing/InterfaceManagement.vue'
 import ApiAutomationTesting from '@/views/api-testing/AutomationTesting.vue'
 import ApiRequestHistory from '@/views/api-testing/RequestHistory.vue'
 import ApiEnvironmentManagement from '@/views/api-testing/EnvironmentManagement.vue'
+import ApiDatasetManagement from '@/views/api-testing/DatasetManagement.vue'
 import ApiReportView from '@/views/api-testing/ReportView.vue'
 import ApiScheduledTasks from '@/views/api-testing/ScheduledTasks.vue'
 import ApiAIServiceConfig from '@/views/api-testing/AIServiceConfig.vue'
@@ -218,6 +219,11 @@ const routes = [
                 path: 'environments',
                 name: 'ApiEnvironments',
                 component: ApiEnvironmentManagement
+            },
+            {
+                path: 'datasets',
+                name: 'ApiDatasets',
+                component: ApiDatasetManagement
             },
             {
                 path: 'reports',

@@ -463,7 +463,7 @@ class EngineExecuteRequestTest(TestCase):
 from django.contrib.auth import get_user_model as _get_user_model
 from apps.api_testing.models import (
     ApiProject, ApiRequest, TestSuite, TestSuiteRequest,
-    TestExecution, TestStepResult,
+    TestExecution, TestStepResult, TestDataset,
 )
 from apps.api_testing.reporters import build_junit_xml, build_json_report, build_report
 from xml.etree import ElementTree as ET
@@ -822,3 +822,224 @@ class RunApiSuiteCLITest(_ReporterTestBase):
             finally:
                 if os.path.exists(tmp.name):
                     os.unlink(tmp.name)
+
+
+# ================ TestDataset 与引擎 DDT 联动 ================
+
+class TestDatasetModelTest(TestCase):
+    """TestDataset 基础模型行为"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = UserModel.objects.create_user(
+            username='dataset_owner', password='x', email='d@e.com',
+        )
+        cls.project = ApiProject.objects.create(
+            name='Dataset 测试项目', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.user,
+        )
+
+    def test_default_format_inline(self):
+        ds = TestDataset.objects.create(
+            project=self.project, name='默认格式',
+            created_by=self.user,
+        )
+        self.assertEqual(ds.format, 'inline')
+        self.assertEqual(ds.data, [])
+        self.assertEqual(ds.columns, [])
+
+    def test_str_includes_format(self):
+        ds = TestDataset.objects.create(
+            project=self.project, name='登录数据', format='csv',
+            data=[{'a': 1}], created_by=self.user,
+        )
+        self.assertIn('登录数据', str(ds))
+        self.assertIn('CSV', str(ds))
+
+
+class EngineResolveDataSetTest(TestCase):
+    """_resolve_step_data_set 应优先 dataset,退回 inline"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = UserModel.objects.create_user(
+            username='resolve_tester', password='x', email='r@e.com',
+        )
+        cls.project = ApiProject.objects.create(
+            name='Resolve 项目', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.user,
+        )
+        cls.suite = TestSuite.objects.create(
+            project=cls.project, name='Resolve 套件', created_by=cls.user,
+        )
+        cls.req = ApiRequest.objects.create(
+            name='接口', method='GET', url='https://x/',
+            headers=[], params={}, body={}, created_by=cls.user,
+        )
+        cls.step = TestSuiteRequest.objects.create(
+            test_suite=cls.suite, request=cls.req, order=1,
+        )
+
+    def test_dataset_takes_priority_over_inline(self):
+        ds = TestDataset.objects.create(
+            project=self.project, name='外部',
+            data=[{'u': 'admin'}, {'u': 'guest'}],
+            created_by=self.user,
+        )
+        self.step.dataset = ds
+        self.step.data_set = [{'inline': True}]
+        self.step.save()
+
+        resolved = engine_module.TestExecutionEngine._resolve_step_data_set(self.step)
+        self.assertEqual(resolved, [{'u': 'admin'}, {'u': 'guest'}])
+
+    def test_empty_dataset_falls_back_to_inline(self):
+        ds = TestDataset.objects.create(
+            project=self.project, name='空',
+            data=[], created_by=self.user,
+        )
+        self.step.dataset = ds
+        self.step.data_set = [{'inline': True}]
+        self.step.save()
+
+        resolved = engine_module.TestExecutionEngine._resolve_step_data_set(self.step)
+        self.assertEqual(resolved, [{'inline': True}])
+
+    def test_no_dataset_uses_inline(self):
+        self.step.dataset = None
+        self.step.data_set = [{'x': 1}]
+        self.step.save()
+
+        resolved = engine_module.TestExecutionEngine._resolve_step_data_set(self.step)
+        self.assertEqual(resolved, [{'x': 1}])
+
+
+class TestDatasetSerializerTest(TestCase):
+    """TestDatasetSerializer 校验逻辑"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = UserModel.objects.create_user(
+            username='ser_tester', password='x', email='s@e.com',
+        )
+        cls.project = ApiProject.objects.create(
+            name='Ser 项目', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.user,
+        )
+
+    def _make_serializer(self, data, **kwargs):
+        from apps.api_testing.serializers import TestDatasetSerializer
+        return TestDatasetSerializer(data=data, context={'request': type('R', (), {'user': self.user})}, **kwargs)
+
+    def test_non_list_data_rejected(self):
+        s = self._make_serializer({
+            'project': self.project.id, 'name': 'x', 'data': {'a': 1},
+        })
+        self.assertFalse(s.is_valid())
+        self.assertIn('data', s.errors)
+
+    def test_non_dict_row_rejected(self):
+        s = self._make_serializer({
+            'project': self.project.id, 'name': 'x', 'data': ['string_row'],
+        })
+        self.assertFalse(s.is_valid())
+        self.assertIn('data', s.errors)
+
+    def test_valid_list_of_dicts_accepted(self):
+        s = self._make_serializer({
+            'project': self.project.id, 'name': 'ok',
+            'data': [{'a': 1}, {'a': 2}],
+        })
+        self.assertTrue(s.errors == {} if s.is_valid() else False, s.errors)
+
+
+class TestDatasetViewSetTest(TestCase):
+    """ViewSet 数据隔离与 CSV 导入"""
+
+    @classmethod
+    def setUpTestData(cls):
+        from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        cls.api_client_cls = APIClient
+        cls.user = UserModel.objects.create_user(
+            username='ds_api_user', password='x', email='a@b.com',
+        )
+        cls.other_user = UserModel.objects.create_user(
+            username='ds_other', password='x', email='o@b.com',
+        )
+        cls.project = ApiProject.objects.create(
+            name='ViewSet 项目', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.user,
+        )
+        cls.other_project = ApiProject.objects.create(
+            name='别人的项目', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.other_user,
+        )
+        TestDataset.objects.create(
+            project=cls.project, name='我的数据集', format='inline',
+            data=[{'a': 1}], created_by=cls.user,
+        )
+        TestDataset.objects.create(
+            project=cls.other_project, name='别人的数据集', format='inline',
+            data=[{'a': 2}], created_by=cls.other_user,
+        )
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(self.user)
+        return c
+
+    def test_queryset_isolation(self):
+        c = self._client()
+        r = c.get('/api/api-testing/datasets/')
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        items = body.get('results', body)
+        names = [it['name'] for it in items]
+        self.assertIn('我的数据集', names)
+        self.assertNotIn('别人的数据集', names)
+
+    def test_csv_import_creates_rows(self):
+        ds = TestDataset.objects.create(
+            project=self.project, name='CSV 导入目标', created_by=self.user,
+        )
+        c = self._client()
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        csv_bytes = b'username,password\nadmin,123\nguest,abc\n'
+        upload = SimpleUploadedFile('t.csv', csv_bytes, content_type='text/csv')
+        r = c.post(
+            f'/api/api-testing/datasets/{ds.id}/import-csv/',
+            {'file': upload, 'has_header': 'true'},
+            format='multipart',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body['row_count'], 2)
+        self.assertEqual(body['columns'], ['username', 'password'])
+
+        ds.refresh_from_db()
+        self.assertEqual(ds.format, 'csv')
+        self.assertEqual(ds.data[0]['username'], 'admin')
+
+    def test_csv_import_sanitizes_formula_injection(self):
+        ds = TestDataset.objects.create(
+            project=self.project, name='CSV 注入测试', created_by=self.user,
+        )
+        c = self._client()
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        csv_bytes = b'name\n=cmd|calc\n+5\n@SUM\n'
+        upload = SimpleUploadedFile('t.csv', csv_bytes, content_type='text/csv')
+        r = c.post(
+            f'/api/api-testing/datasets/{ds.id}/import-csv/',
+            {'file': upload},
+            format='multipart',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        ds.refresh_from_db()
+        values = [row['name'] for row in ds.data]
+        self.assertIn("'=cmd|calc", values)
+        self.assertIn("'+5", values)
+        self.assertIn("'@SUM", values)
+

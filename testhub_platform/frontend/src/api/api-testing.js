@@ -173,3 +173,65 @@ export function getOperationLogs(params) {
     params
   })
 }
+
+// ================ 测试数据集 (DDT) ================
+
+export function getDatasets(params) {
+  return request({
+    url: '/api-testing/datasets/',
+    method: 'get',
+    params
+  })
+}
+
+export function getDataset(id) {
+  return request({
+    url: `/api-testing/datasets/${id}/`,
+    method: 'get'
+  })
+}
+
+export function createDataset(data) {
+  return request({
+    url: '/api-testing/datasets/',
+    method: 'post',
+    data
+  })
+}
+
+export function updateDataset(id, data) {
+  return request({
+    url: `/api-testing/datasets/${id}/`,
+    method: 'patch',
+    data
+  })
+}
+
+export function deleteDataset(id) {
+  return request({
+    url: `/api-testing/datasets/${id}/`,
+    method: 'delete'
+  })
+}
+
+export function batchDeleteDatasets(ids) {
+  return request({
+    url: '/api-testing/datasets/bulk-delete/',
+    method: 'post',
+    data: { ids }
+  })
+}
+
+export function importDatasetCsv(id, file, hasHeader = true, encoding = 'utf-8') {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('has_header', String(hasHeader))
+  formData.append('encoding', encoding)
+  return request({
+    url: `/api-testing/datasets/${id}/import-csv/`,
+    method: 'post',
+    data: formData,
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000
+  })
+}

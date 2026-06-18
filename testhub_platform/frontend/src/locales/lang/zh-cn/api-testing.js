@@ -48,7 +48,8 @@ export default {
     failed: '失败',
     extract: '提取',
     import: '导入',
-    export: '导出'
+    export: '导出',
+    actions: '操作'
   },
 
   // 仪表板
@@ -570,6 +571,58 @@ export default {
     confirmDeleteEnv: '确定要删除环境 "{name}" 吗？'
   },
 
+  // 数据集管理
+  dataset: {
+    title: '数据集管理',
+    create: '新建数据集',
+    createTitle: '新建数据集',
+    editTitle: '编辑数据集',
+    searchPlaceholder: '搜索数据集名称',
+    namePlaceholder: '请输入数据集名称',
+    nameRequired: '请输入数据集名称',
+    columnName: '名称',
+    columnProject: '所属项目',
+    columnFormat: '格式',
+    columnRowCount: '行数',
+    columnDescription: '描述',
+    columnUpdatedAt: '更新时间',
+    columnRowIndex: '#',
+    formatInline: '内联 JSON',
+    formatCsv: 'CSV',
+    formatJson: 'JSON 文件',
+    btnEdit: '编辑信息',
+    btnEditData: '编辑数据',
+    btnImportCsv: 'CSV 导入',
+    dataEditorTitle: '数据编辑',
+    dataHint: '每一行是一个迭代对象;key 会作为变量名在请求中用 {{key}} 引用',
+    emptyHint: '暂无数据,点击「新增一行」开始',
+    addRow: '新增一行',
+    addColumn: '新增列',
+    newColumnName: '新列名',
+    columnNameEmpty: '请输入列名',
+    columnNameDuplicate: '列名已存在',
+    csvImportTitle: 'CSV 导入',
+    csvFile: '选择文件',
+    csvHasHeader: '首行为表头',
+    csvEncoding: '文件编码',
+    csvExceedHint: '只能选一个文件,请先移除已选',
+    pickCsv: '选择 CSV 文件',
+    previewReady: '即将导入 {rows} 行 / {cols} 列',
+    confirmImport: '开始导入',
+    deleteConfirm: '确认删除数据集「{name}」?该操作不可恢复',
+    deleteSuccess: '已删除',
+    deleteFailed: '删除失败',
+    createSuccess: '已创建',
+    updateSuccess: '已更新',
+    saveSuccess: '已保存',
+    saveFailed: '保存失败',
+    submitFailed: '提交失败',
+    loadFailed: '加载失败',
+    loadProjectsFailed: '加载项目失败',
+    importSuccess: '已导入 {rows} 行',
+    importFailed: '导入失败'
+  },
+
   // 测试报告
   report: {
     title: '测试报告',
@@ -606,10 +659,17 @@ export default {
     noAssertionsResults: '无断言结果',
     noExtractedVars: '无提取变量',
     noScriptLogs: '无脚本日志',
+    noSnapshot: '无快照',
     passed: '通过',
     failed: '失败',
     errored: '错误',
-    skipped: '跳过'
+    skipped: '跳过',
+    expected: '期望',
+    actual: '实际',
+    requestSnapshot: '请求快照',
+    responseSnapshot: '响应快照',
+    iterationSummary: '迭代维度汇总',
+    iterationFilterAll: '全部'
   },
 
   // 通知管理

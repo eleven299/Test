@@ -53,102 +53,167 @@
       v-model="stepDrawerVisible"
       :title="`${$t('apiTesting.report.stepDetail')} #${currentExecutionId}`"
       direction="rtl"
-      size="70%"
+      size="75%"
     >
       <div v-loading="stepsLoading">
         <el-empty v-if="!stepsLoading && steps.length === 0" :description="$t('apiTesting.report.noSteps')" />
 
-        <el-collapse v-else v-model="activeStepNames">
-          <el-collapse-item
-            v-for="step in steps"
-            :key="step.id"
-            :name="step.id"
-          >
-            <template #title>
-              <div class="step-collapse-title">
-                <el-tag :type="getStepStatusType(step.status)" size="small">
-                  {{ getStepStatusText(step.status) }}
-                </el-tag>
-                <span class="step-title-text">
-                  {{ step.request_name || step.url }}
-                  <span v-if="step.method" class="step-method-tag">{{ step.method }}</span>
-                </span>
-                <span v-if="step.attempt && step.attempt > 1" class="step-attempt">
-                  {{ $t('apiTesting.report.attempt') }}: {{ step.attempt }}
-                </span>
-              </div>
-            </template>
-
-            <div class="step-detail-body">
-              <div class="step-summary-row">
-                <span v-if="step.status_code" class="step-summary-item">
-                  <strong>{{ $t('apiTesting.report.statusCode') }}:</strong>
-                  <el-tag size="small" :type="step.status_code >= 200 && step.status_code < 300 ? 'success' : 'danger'">
-                    {{ step.status_code }}
-                  </el-tag>
-                </span>
-                <span v-if="step.response_time != null" class="step-summary-item">
-                  <strong>{{ $t('apiTesting.report.responseTime') }}:</strong>
-                  {{ step.response_time.toFixed(0) }}ms
-                </span>
-                <span v-if="step.iteration != null && step.iteration > 0" class="step-summary-item">
-                  <strong>{{ $t('apiTesting.report.iteration') }}:</strong>
-                  {{ step.iteration }}
-                </span>
-              </div>
-
-              <el-tabs class="step-tabs">
-                <el-tab-pane :label="$t('apiTesting.report.assertionsResults')" name="assertions">
-                  <div v-if="step.assertions_results && step.assertions_results.length">
-                    <div
-                      v-for="(a, idx) in step.assertions_results"
-                      :key="idx"
-                      class="assertion-line"
-                      :class="{ 'is-passed': a.passed, 'is-failed': !a.passed }"
-                    >
-                      <span class="assertion-status">{{ a.passed ? '✓' : '✗' }}</span>
-                      <span class="assertion-name">{{ a.name || a.assertion || `#${idx + 1}` }}</span>
-                      <span v-if="a.error_message || a.error" class="assertion-error">
-                        {{ a.error_message || a.error }}
-                      </span>
-                    </div>
-                  </div>
-                  <el-empty v-else :description="$t('apiTesting.report.noAssertionsResults')" :image-size="60" />
-                </el-tab-pane>
-
-                <el-tab-pane :label="$t('apiTesting.report.extractedVars')" name="extracted">
-                  <div v-if="step.extracted_vars && Object.keys(step.extracted_vars).length">
-                    <div
-                      v-for="(value, key) in step.extracted_vars"
-                      :key="key"
-                      class="extracted-var-line"
-                    >
-                      <span class="var-key">{{ key }}:</span>
-                      <code class="var-value">{{ formatVarValue(value) }}</code>
-                    </div>
-                  </div>
-                  <el-empty v-else :description="$t('apiTesting.report.noExtractedVars')" :image-size="60" />
-                </el-tab-pane>
-
-                <el-tab-pane :label="$t('apiTesting.report.scriptLogs')" name="logs">
-                  <pre v-if="step.script_logs && step.script_logs.length" class="script-log-pre">{{ step.script_logs.join('\n') }}</pre>
-                  <el-empty v-else :description="$t('apiTesting.report.noScriptLogs')" :image-size="60" />
-                </el-tab-pane>
-
-                <el-tab-pane v-if="step.error_message" :label="$t('apiTesting.report.errorMessage')" name="error">
-                  <pre class="script-log-pre error-pre">{{ step.error_message }}</pre>
-                </el-tab-pane>
-              </el-tabs>
+        <div v-else>
+          <div class="iteration-summary" v-if="iterationSummary.length > 0">
+            <div class="iteration-summary-title">
+              {{ $t('apiTesting.report.iterationSummary') }}
             </div>
-          </el-collapse-item>
-        </el-collapse>
+            <div class="iteration-summary-cards">
+              <div
+                v-for="it in iterationSummary"
+                :key="it.iteration"
+                class="iteration-card"
+                :class="{ 'is-active': activeIteration === it.iteration, 'has-failed': it.failed > 0 }"
+                @click="toggleIteration(it.iteration)"
+              >
+                <div class="iteration-card-header">
+                  <span class="iteration-card-name">#{{ it.iteration }}</span>
+                  <el-tag v-if="it.failed === 0" type="success" size="small">PASS</el-tag>
+                  <el-tag v-else type="danger" size="small">FAIL {{ it.failed }}</el-tag>
+                </div>
+                <div class="iteration-card-stats">
+                  <span class="passed">{{ it.passed }}</span>/<span>{{ it.total }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="iteration-filter-row">
+              <el-radio-group v-model="activeIteration" size="small">
+                <el-radio-button :value="-1">{{ $t('apiTesting.report.iterationFilterAll') }}</el-radio-button>
+                <el-radio-button
+                  v-for="it in iterationSummary"
+                  :key="it.iteration"
+                  :value="it.iteration"
+                >#{{ it.iteration }}</el-radio-button>
+              </el-radio-group>
+            </div>
+          </div>
+
+          <el-collapse v-model="activeStepNames">
+            <el-collapse-item
+              v-for="step in filteredSteps"
+              :key="step.id"
+              :name="step.id"
+            >
+              <template #title>
+                <div class="step-collapse-title">
+                  <el-tag :type="getStepStatusType(step.status)" size="small">
+                    {{ getStepStatusText(step.status) }}
+                  </el-tag>
+                  <span v-if="step.iteration != null" class="step-iteration-tag">
+                    #{{ step.iteration }}
+                  </span>
+                  <span class="step-title-text">
+                    {{ step.request_name || step.url }}
+                    <span v-if="step.method" class="step-method-tag">{{ step.method }}</span>
+                  </span>
+                  <span v-if="step.attempt && step.attempt > 1" class="step-attempt">
+                    {{ $t('apiTesting.report.attempt') }}: {{ step.attempt }}
+                  </span>
+                </div>
+              </template>
+
+              <div class="step-detail-body">
+                <div class="step-summary-row">
+                  <span v-if="step.status_code" class="step-summary-item">
+                    <strong>{{ $t('apiTesting.report.statusCode') }}:</strong>
+                    <el-tag size="small" :type="step.status_code >= 200 && step.status_code < 300 ? 'success' : 'danger'">
+                      {{ step.status_code }}
+                    </el-tag>
+                  </span>
+                  <span v-if="step.response_time != null" class="step-summary-item">
+                    <strong>{{ $t('apiTesting.report.responseTime') }}:</strong>
+                    {{ step.response_time.toFixed(0) }}ms
+                  </span>
+                  <span v-if="step.iteration != null" class="step-summary-item">
+                    <strong>{{ $t('apiTesting.report.iteration') }}:</strong>
+                    {{ step.iteration }}
+                  </span>
+                </div>
+
+                <el-tabs class="step-tabs">
+                  <el-tab-pane :label="$t('apiTesting.report.assertionsResults') + ` (${step.assertions_results?.length || 0})`" name="assertions">
+                    <div v-if="step.assertions_results && step.assertions_results.length">
+                      <div
+                        v-for="(a, idx) in step.assertions_results"
+                        :key="idx"
+                        class="assertion-line"
+                        :class="{ 'is-passed': a.passed, 'is-failed': !a.passed }"
+                      >
+                        <span class="assertion-status">{{ a.passed ? '✓' : '✗' }}</span>
+                        <div class="assertion-body">
+                          <div class="assertion-head-row">
+                            <span class="assertion-name">{{ a.name || `#${idx + 1}` }}</span>
+                            <span v-if="a.source" class="assertion-meta">
+                              <el-tag size="small" type="info" effect="plain">{{ a.source }}</el-tag>
+                              <el-tag v-if="a.operator" size="small" type="info" effect="plain">{{ a.operator }}</el-tag>
+                            </span>
+                          </div>
+                          <div v-if="!a.passed" class="assertion-compare">
+                            <div class="compare-row">
+                              <span class="compare-label">{{ $t('apiTesting.report.expected') }}:</span>
+                              <code class="compare-value">{{ formatVarValue(a.expected) }}</code>
+                            </div>
+                            <div class="compare-row">
+                              <span class="compare-label">{{ $t('apiTesting.report.actual') }}:</span>
+                              <code class="compare-value actual">{{ formatVarValue(a.actual) }}</code>
+                            </div>
+                            <div v-if="a.error" class="assertion-error">{{ a.error }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <el-empty v-else :description="$t('apiTesting.report.noAssertionsResults')" :image-size="60" />
+                  </el-tab-pane>
+
+                  <el-tab-pane :label="$t('apiTesting.report.extractedVars') + ` (${extractedCount(step.extracted_vars)})`" name="extracted">
+                    <div v-if="step.extracted_vars && Object.keys(step.extracted_vars).length">
+                      <div
+                        v-for="(value, key) in step.extracted_vars"
+                        :key="key"
+                        class="extracted-var-line"
+                      >
+                        <span class="var-key">{{ key }}:</span>
+                        <code class="var-value">{{ formatVarValue(value) }}</code>
+                      </div>
+                    </div>
+                    <el-empty v-else :description="$t('apiTesting.report.noExtractedVars')" :image-size="60" />
+                  </el-tab-pane>
+
+                  <el-tab-pane :label="$t('apiTesting.report.scriptLogs') + ` (${(step.script_logs || []).length})`" name="logs">
+                    <pre v-if="step.script_logs && step.script_logs.length" class="script-log-pre">{{ step.script_logs.join('\n') }}</pre>
+                    <el-empty v-else :description="$t('apiTesting.report.noScriptLogs')" :image-size="60" />
+                  </el-tab-pane>
+
+                  <el-tab-pane :label="$t('apiTesting.report.requestSnapshot')" name="request">
+                    <pre v-if="step.request_snapshot && Object.keys(step.request_snapshot).length" class="script-log-pre">{{ formatSnapshot(step.request_snapshot) }}</pre>
+                    <el-empty v-else :description="$t('apiTesting.report.noSnapshot')" :image-size="60" />
+                  </el-tab-pane>
+
+                  <el-tab-pane :label="$t('apiTesting.report.responseSnapshot')" name="response">
+                    <pre v-if="step.response_snapshot && Object.keys(step.response_snapshot).length" class="script-log-pre">{{ formatSnapshot(step.response_snapshot) }}</pre>
+                    <el-empty v-else :description="$t('apiTesting.report.noSnapshot')" :image-size="60" />
+                  </el-tab-pane>
+
+                  <el-tab-pane v-if="step.error_message" :label="$t('apiTesting.report.errorMessage')" name="error">
+                    <pre class="script-log-pre error-pre">{{ step.error_message }}</pre>
+                  </el-tab-pane>
+                </el-tabs>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import api from '@/utils/api'
@@ -163,6 +228,7 @@ const stepsLoading = ref(false)
 const steps = ref([])
 const currentExecutionId = ref(null)
 const activeStepNames = ref([])
+const activeIteration = ref(-1)
 
 const loadReports = async () => {
   loading.value = true
@@ -204,12 +270,14 @@ const openStepDrawer = async (report) => {
   stepDrawerVisible.value = true
   steps.value = []
   activeStepNames.value = []
+  activeIteration.value = -1
   stepsLoading.value = true
   try {
     const response = await api.get(`/api-testing/test-executions/${report.id}/step-results/`)
-    steps.value = response.data.results || []
-    if (steps.value.length > 0) {
-      activeStepNames.value = [steps.value[0].id]
+    const all = response.data.results || []
+    steps.value = all
+    if (all.length > 0) {
+      activeStepNames.value = [all[0].id]
     }
   } catch (error) {
     ElMessage.error(t('apiTesting.messages.error.loadReports'))
@@ -218,13 +286,52 @@ const openStepDrawer = async (report) => {
   }
 }
 
-const formatVarValue = (value) => {
+const iterationSummary = computed(() => {
+  if (!steps.value.length) return []
+  const map = new Map()
+  for (const s of steps.value) {
+    const key = s.iteration ?? 0
+    if (!map.has(key)) {
+      map.set(key, { iteration: key, passed: 0, failed: 0, total: 0 })
+    }
+    const entry = map.get(key)
+    entry.total += 1
+    if (s.status === 'passed') entry.passed += 1
+    else if (s.status === 'failed' || s.status === 'error') entry.failed += 1
+  }
+  return Array.from(map.values()).sort((a, b) => a.iteration - b.iteration)
+})
+
+const filteredSteps = computed(() => {
+  if (activeIteration.value === -1) return steps.value
+  return steps.value.filter((s) => (s.iteration ?? 0) === activeIteration.value)
+})
+
+function toggleIteration(iter) {
+  activeIteration.value = activeIteration.value === iter ? -1 : iter
+}
+
+function extractedCount(vars) {
+  if (!vars || typeof vars !== 'object') return 0
+  return Object.keys(vars).length
+}
+
+function formatVarValue(value) {
   if (value === null || value === undefined) return ''
   if (typeof value === 'string') return value
   try {
     return JSON.stringify(value)
   } catch (e) {
     return String(value)
+  }
+}
+
+function formatSnapshot(snap) {
+  if (!snap || typeof snap !== 'object') return ''
+  try {
+    return JSON.stringify(snap, null, 2)
+  } catch (e) {
+    return String(snap)
   }
 }
 
@@ -251,14 +358,15 @@ const getStatusText = (status) => {
 }
 
 const getStepStatusType = (status) => {
+  const key = (status || '').toLowerCase()
   const map = {
-    'PASSED': 'success',
-    'FAILED': 'danger',
-    'ERROR': 'danger',
-    'SKIPPED': 'info',
-    'PENDING': 'info'
+    'passed': 'success',
+    'failed': 'danger',
+    'error': 'danger',
+    'skipped': 'info',
+    'pending': 'info'
   }
-  return map[status] || 'info'
+  return map[key] || 'info'
 }
 
 const getStepStatusText = (status) => {
@@ -274,6 +382,7 @@ const formatDate = (dateString) => {
   return dayjs(dateString).format('YYYY-MM-DD HH:mm:ss')
 }
 
+import { onMounted } from 'vue'
 onMounted(() => {
   loadReports()
 })
@@ -304,11 +413,92 @@ onMounted(() => {
   overflow: auto;
 }
 
+.iteration-summary {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+}
+
+.iteration-summary-title {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.iteration-summary-cards {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.iteration-card {
+  background: #ffffff;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 8px 12px;
+  min-width: 90px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.iteration-card:hover {
+  border-color: #409eff;
+}
+
+.iteration-card.is-active {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.iteration-card.has-failed {
+  border-color: #f56c6c;
+}
+
+.iteration-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.iteration-card-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.iteration-card-stats {
+  font-size: 12px;
+  color: #909399;
+}
+
+.iteration-card-stats .passed {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.iteration-filter-row {
+  margin-top: 6px;
+}
+
 .step-collapse-title {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
+}
+
+.step-iteration-tag {
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 3px;
+  background: #fdf6ec;
+  color: #e6a23c;
 }
 
 .step-title-text {
@@ -362,7 +552,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   border-radius: 4px;
   font-size: 13px;
   margin-bottom: 4px;
@@ -370,27 +560,84 @@ onMounted(() => {
 
 .assertion-line.is-passed {
   background: #f0f9eb;
-  color: #67c23a;
 }
 
 .assertion-line.is-failed {
   background: #fef0f0;
-  color: #f56c6c;
 }
 
 .assertion-status {
   font-weight: bold;
   width: 16px;
+  flex-shrink: 0;
+}
+
+.assertion-line.is-passed .assertion-status {
+  color: #67c23a;
+}
+
+.assertion-line.is-failed .assertion-status {
+  color: #f56c6c;
+}
+
+.assertion-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.assertion-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .assertion-name {
-  flex: 1;
   color: #303133;
+  font-weight: 500;
+}
+
+.assertion-meta {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.assertion-compare {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compare-row {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.compare-label {
+  color: #909399;
+  flex-shrink: 0;
+  width: 60px;
+}
+
+.compare-value {
+  background: #f5f7fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  word-break: break-all;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+.compare-value.actual {
+  background: #fff0f0;
+  color: #f56c6c;
 }
 
 .assertion-error {
   color: #f56c6c;
   font-size: 12px;
+  margin-top: 4px;
 }
 
 .extracted-var-line {
@@ -413,6 +660,7 @@ onMounted(() => {
   padding: 2px 6px;
   border-radius: 3px;
   word-break: break-all;
+  font-family: 'SFMono-Regular', Consolas, monospace;
 }
 
 .script-log-pre {

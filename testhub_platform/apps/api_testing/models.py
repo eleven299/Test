@@ -211,6 +211,42 @@ class TestSuite(models.Model):
         return self.name
 
 
+class TestDataset(models.Model):
+    """测试数据集 (DDT 数据驱动)
+
+    持有项目下复用的迭代数据,TestSuiteRequest.dataset 通过外键引用,
+    执行时引擎将其 data 行作为迭代变量注入 L4 作用域。
+    """
+    FORMAT_CHOICES = [
+        ('inline', '内联 JSON'),
+        ('csv', 'CSV'),
+        ('json', 'JSON 文件'),
+    ]
+
+    project = models.ForeignKey(ApiProject, on_delete=models.CASCADE,
+                                related_name='datasets', verbose_name='所属项目')
+    name = models.CharField(max_length=200, verbose_name='数据集名称')
+    description = models.TextField(blank=True, verbose_name='描述')
+    format = models.CharField(max_length=20, choices=FORMAT_CHOICES, default='inline',
+                              verbose_name='数据格式')
+    data = models.JSONField(default=list, verbose_name='数据内容',
+                            help_text='JSON 数组,每行一个 dict;每行的 key 注入为迭代变量')
+    columns = models.JSONField(default=list, verbose_name='列定义',
+                               help_text='CSV 模式下的列名顺序,用于展示与校验')
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='创建者')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'api_test_datasets'
+        verbose_name = '测试数据集'
+        verbose_name_plural = '测试数据集'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.get_format_display()})"
+
+
 class TestSuiteRequest(models.Model):
     """测试套件中的请求关联模型"""
     test_suite = models.ForeignKey(TestSuite, on_delete=models.CASCADE, verbose_name='测试套件')
@@ -226,8 +262,13 @@ class TestSuiteRequest(models.Model):
                                             help_text='0 表示使用请求默认超时')
 
     # —— DDT 数据驱动(P2) ——
-    data_set = models.JSONField(default=list, verbose_name='数据集',
+    data_set = models.JSONField(default=list, verbose_name='数据集(内联)',
                                 help_text='DDT 迭代数据,每行一个 dict;空列表表示单次执行(无迭代)')
+    dataset = models.ForeignKey(
+        TestDataset, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='suite_requests', verbose_name='关联数据集',
+        help_text='引用独立数据集;非空时优先于内联 data_set 使用'
+    )
 
     class Meta:
         db_table = 'api_test_suite_requests'
@@ -678,6 +719,7 @@ class OperationLog(models.Model):
         ('environment', '环境'),
         ('task', '定时任务'),
         ('execution', '执行记录'),
+        ('dataset', '数据集'),
     ]
 
     operation_type = models.CharField(max_length=20, choices=OPERATION_TYPE_CHOICES, verbose_name='操作类型')

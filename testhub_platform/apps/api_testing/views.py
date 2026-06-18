@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from .models import (
     ApiProject, ApiCollection, ApiRequest, Environment,
     RequestHistory, TestSuite, TestExecution, TestSuiteRequest,
-    TestStepResult,
+    TestStepResult, TestDataset,
     ScheduledTask, TaskExecutionLog, NotificationLog,
     TaskNotificationSetting, OperationLog, AIServiceConfig,
 )
@@ -37,7 +37,7 @@ from .serializers import (
     NotificationLogSerializer, TaskNotificationSettingSerializer,
     NotificationLogDetailSerializer,
     TaskNotificationSettingDetailSerializer, OperationLogSerializer,
-    TestStepResultSerializer,
+    TestStepResultSerializer, TestDatasetSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -645,6 +645,168 @@ class TestSuiteRequestViewSet(viewsets.ModelViewSet):
                 models.Q(owner=user) | models.Q(members=user)
             )
         ).distinct()
+
+
+class TestDatasetViewSet(viewsets.ModelViewSet):
+    """测试数据集 ViewSet
+
+    提供 CRUD + CSV 导入。数据隔离基于项目可见性:
+    只能看到自己 owner / member 的项目下的数据集。
+    """
+    queryset = TestDataset.objects.all()
+    serializer_class = TestDatasetSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['project', 'format']
+    search_fields = ['name', 'description']
+    ordering_fields = ['created_at', 'updated_at', 'name']
+    ordering = ['-created_at']
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        user = self.request.user
+        return TestDataset.objects.filter(
+            project__in=ApiProject.objects.filter(
+                models.Q(owner=user) | models.Q(members=user)
+            )
+        ).select_related('project', 'created_by').distinct()
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        log_operation(
+            operation_type='create',
+            resource_type='dataset',
+            resource_id=instance.id,
+            resource_name=instance.name,
+            user=self.request.user,
+        )
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        log_operation(
+            operation_type='edit',
+            resource_type='dataset',
+            resource_id=instance.id,
+            resource_name=instance.name,
+            user=self.request.user,
+        )
+
+    def perform_destroy(self, instance):
+        log_operation(
+            operation_type='delete',
+            resource_type='dataset',
+            resource_id=instance.id,
+            resource_name=instance.name,
+            user=self.request.user,
+        )
+        instance.delete()
+
+    @action(detail=True, methods=['post'], url_path='import-csv')
+    def import_csv(self, request, pk=None):
+        """从上传的 CSV 文件导入数据。
+
+        请求体:
+            file: multipart 文件
+            has_header: 是否首行为表头(默认 true)
+            encoding: 默认 utf-8
+
+        返回:
+            {
+              "columns": [...],
+              "row_count": N,
+              "preview": [前 10 行]
+            }
+        已持久化到 dataset.data + dataset.columns。
+        """
+        import csv as csvlib
+        import io
+
+        dataset = self.get_object()
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'error': '未提供 file 字段'}, status=status.HTTP_400_BAD_REQUEST)
+
+        has_header = str(request.data.get('has_header', 'true')).lower() != 'false'
+        encoding = request.data.get('encoding') or 'utf-8'
+
+        try:
+            raw = upload.read()
+            text = raw.decode(encoding, errors='replace')
+        except LookupError:
+            return Response({'error': f'未知编码: {encoding}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 跳过 BOM
+        if text and text[0] == '﻿':
+            text = text[1:]
+
+        reader = csvlib.reader(io.StringIO(text))
+        rows = list(reader)
+        if not rows:
+            return Response({'error': 'CSV 为空'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # CSV injection 防护: 以 = + - @ 开头的单元格前置单引号
+        def _sanitize(cell):
+            if isinstance(cell, str) and cell and cell[0] in ('=', '+', '-', '@'):
+                return f"'{cell}"
+            return cell
+
+        if has_header:
+            columns = [c.strip() for c in rows[0]]
+            data_rows = rows[1:]
+        else:
+            max_cols = max(len(r) for r in rows)
+            columns = [f'col_{i}' for i in range(max_cols)]
+            data_rows = rows
+
+        data = []
+        for raw_row in data_rows:
+            row_obj = {}
+            for i, value in enumerate(raw_row):
+                if i >= len(columns):
+                    columns.append(f'col_{i}')
+                row_obj[columns[i]] = _sanitize(value)
+            data.append(row_obj)
+
+        dataset.data = data
+        dataset.columns = columns
+        dataset.format = 'csv'
+        dataset.save(update_fields=['data', 'columns', 'format', 'updated_at'])
+
+        log_operation(
+            operation_type='edit',
+            resource_type='dataset',
+            resource_id=dataset.id,
+            resource_name=dataset.name,
+            user=request.user,
+            description=f'从 CSV 导入 {len(data)} 行',
+        )
+
+        return Response({
+            'columns': columns,
+            'row_count': len(data),
+            'preview': data[:10],
+        })
+
+    @action(detail=False, methods=['post'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        """批量删除数据集(只在用户可见范围内)"""
+        ids = request.data.get('ids', []) or []
+        if not isinstance(ids, list) or not ids:
+            return Response({'error': '未提供 ids'}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = self.get_queryset().filter(id__in=ids)
+        valid_ids = list(queryset.values_list('id', flat=True))
+        deleted, _ = TestDataset.objects.filter(id__in=valid_ids).delete()
+
+        for vid in valid_ids:
+            log_operation(
+                operation_type='delete',
+                resource_type='dataset',
+                resource_id=vid,
+                resource_name='',
+                user=request.user,
+            )
+        return Response({'message': f'成功删除 {deleted} 条', 'deleted': deleted})
 
 
 class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):

@@ -80,6 +80,10 @@
               <el-icon><Setting /></el-icon>
               <span>{{ $t('menu.environmentManagement') }}</span>
             </el-menu-item>
+            <el-menu-item index="/api-testing/datasets">
+              <el-icon><Files /></el-icon>
+              <span>{{ $t('menu.datasetManagement') }}</span>
+            </el-menu-item>
             <el-menu-item index="/api-testing/reports">
               <el-icon><DataAnalysis /></el-icon>
               <span>{{ $t('menu.testReport') }}</span>
@@ -324,7 +328,7 @@ import { useI18n } from 'vue-i18n'
 import {
   Monitor, Folder, Document, Flag, Check, Collection, VideoPlay,
   DataAnalysis, ChatDotRound, DocumentCopy, Link, MagicStick,
-  Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, ArrowDown, Cellphone, Connection, FolderOpened
+  Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, ArrowDown, Cellphone, Connection, FolderOpened, Files
 } from '@element-plus/icons-vue'
 import logoSvg from '@/assets/images/logo.svg'
 import logoHomePng from '@/assets/images/logo_home.png'
@@ -394,6 +398,7 @@ const breadcrumbTitle = computed(() => {
     '/api-testing/automation': t('menu.automationTesting'),
     '/api-testing/history': t('menu.requestHistory'),
     '/api-testing/environments': t('menu.environmentManagement'),
+    '/api-testing/datasets': t('menu.datasetManagement'),
     '/api-testing/reports': t('menu.testReport'),
     '/api-testing/scheduled-tasks': t('menu.scheduledTasks'),
     '/api-testing/notification-logs': t('menu.notificationList'),

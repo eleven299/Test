@@ -48,7 +48,8 @@ export default {
     failed: 'Failed',
     extract: 'Extract',
     import: 'Import',
-    export: 'Export'
+    export: 'Export',
+    actions: 'Actions'
   },
 
   // Dashboard
@@ -558,6 +559,58 @@ export default {
     confirmDeleteEnv: 'Are you sure to delete environment "{name}"?'
   },
 
+  // Dataset Management
+  dataset: {
+    title: 'Test Datasets',
+    create: 'New Dataset',
+    createTitle: 'Create Dataset',
+    editTitle: 'Edit Dataset',
+    searchPlaceholder: 'Search dataset name',
+    namePlaceholder: 'Enter dataset name',
+    nameRequired: 'Please enter dataset name',
+    columnName: 'Name',
+    columnProject: 'Project',
+    columnFormat: 'Format',
+    columnRowCount: 'Rows',
+    columnDescription: 'Description',
+    columnUpdatedAt: 'Updated',
+    columnRowIndex: '#',
+    formatInline: 'Inline JSON',
+    formatCsv: 'CSV',
+    formatJson: 'JSON File',
+    btnEdit: 'Edit Info',
+    btnEditData: 'Edit Data',
+    btnImportCsv: 'Import CSV',
+    dataEditorTitle: 'Data Editor',
+    dataHint: 'Each row is an iteration object; keys become variables you can reference as {{key}}',
+    emptyHint: 'No data yet. Click "Add Row" to start',
+    addRow: 'Add Row',
+    addColumn: 'Add Column',
+    newColumnName: 'New column name',
+    columnNameEmpty: 'Column name is empty',
+    columnNameDuplicate: 'Column already exists',
+    csvImportTitle: 'CSV Import',
+    csvFile: 'File',
+    csvHasHeader: 'First row is header',
+    csvEncoding: 'Encoding',
+    csvExceedHint: 'Only one file allowed; remove the existing one first',
+    pickCsv: 'Pick CSV file',
+    previewReady: 'About to import {rows} rows / {cols} cols',
+    confirmImport: 'Import',
+    deleteConfirm: 'Delete dataset "{name}"? This cannot be undone.',
+    deleteSuccess: 'Deleted',
+    deleteFailed: 'Delete failed',
+    createSuccess: 'Created',
+    updateSuccess: 'Updated',
+    saveSuccess: 'Saved',
+    saveFailed: 'Save failed',
+    submitFailed: 'Submit failed',
+    loadFailed: 'Load failed',
+    loadProjectsFailed: 'Failed to load projects',
+    importSuccess: 'Imported {rows} rows',
+    importFailed: 'Import failed'
+  },
+
   // Test Reports
   report: {
     title: 'Test Reports',
@@ -594,10 +647,17 @@ export default {
     noAssertionsResults: 'No assertion results',
     noExtractedVars: 'No extracted variables',
     noScriptLogs: 'No script logs',
+    noSnapshot: 'No snapshot',
     passed: 'Passed',
     failed: 'Failed',
     errored: 'Errored',
-    skipped: 'Skipped'
+    skipped: 'Skipped',
+    expected: 'Expected',
+    actual: 'Actual',
+    requestSnapshot: 'Request Snapshot',
+    responseSnapshot: 'Response Snapshot',
+    iterationSummary: 'Iteration Summary',
+    iterationFilterAll: 'All'
   },
 
   // Notification Management

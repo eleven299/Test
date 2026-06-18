@@ -15,7 +15,7 @@ class NullableDateField(serializers.DateField):
 from .models import (
     ApiProject, ApiCollection, ApiRequest, Environment,
     RequestHistory, TestSuite, TestExecution, TestSuiteRequest,
-    TestStepResult,
+    TestStepResult, TestDataset,
     ScheduledTask, TaskExecutionLog, NotificationLog,
     TaskNotificationSetting, OperationLog, AIServiceConfig,
 )
@@ -177,6 +177,11 @@ class RequestHistorySerializer(serializers.ModelSerializer):
 
 class TestSuiteRequestSerializer(serializers.ModelSerializer):
     request = ApiRequestSerializer(read_only=True)
+    dataset = serializers.PrimaryKeyRelatedField(
+        queryset=TestDataset.objects.all(),
+        required=False, allow_null=True
+    )
+    dataset_name = serializers.CharField(source='dataset.name', read_only=True)
 
     class Meta:
         model = TestSuiteRequest
@@ -184,7 +189,45 @@ class TestSuiteRequestSerializer(serializers.ModelSerializer):
                   # P0 新增:步骤级控制
                   'is_critical', 'timeout_override',
                   # P2: DDT 数据集
-                  'data_set']
+                  'data_set', 'dataset', 'dataset_name']
+
+
+class TestDatasetSerializer(serializers.ModelSerializer):
+    """测试数据集序列化器"""
+    created_by = UserSerializer(read_only=True)
+    project_name = serializers.CharField(source='project.name', read_only=True)
+    format_display = serializers.CharField(source='get_format_display', read_only=True)
+    row_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TestDataset
+        fields = [
+            'id', 'project', 'project_name', 'name', 'description',
+            'format', 'format_display', 'data', 'columns', 'row_count',
+            'created_by', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'project_name']
+
+    def get_row_count(self, obj):
+        if isinstance(obj.data, list):
+            return len(obj.data)
+        return 0
+
+    def validate(self, attrs):
+        data = attrs.get('data')
+        if data is not None:
+            if not isinstance(data, list):
+                raise serializers.ValidationError({'data': 'data 必须是数组'})
+            for idx, row in enumerate(data):
+                if not isinstance(row, dict):
+                    raise serializers.ValidationError({
+                        'data': f'第 {idx} 行不是对象: {row!r}'
+                    })
+        return attrs
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 
 class TestSuiteSerializer(serializers.ModelSerializer):
