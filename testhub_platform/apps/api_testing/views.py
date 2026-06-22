@@ -808,6 +808,72 @@ class TestDatasetViewSet(viewsets.ModelViewSet):
             )
         return Response({'message': f'成功删除 {deleted} 条', 'deleted': deleted})
 
+    @action(detail=True, methods=['post'], url_path='run')
+    def run(self, request, pk=None):
+        """用当前数据集驱动一次测试套件执行(DDT 批量执行)
+
+        请求体:
+            test_suite_id   必填,要执行的测试套件
+            environment_id  可选,覆盖套件默认环境
+
+        说明:
+            - 不修改库中 TestSuiteRequest.dataset 关联,仅作为 engine 的 dataset_override 传入
+            - 执行完成后返回 TestExecution,前端可跳转报告页查看详情
+        """
+        from .engine import TestExecutionEngine
+
+        dataset = self.get_object()
+        test_suite_id = request.data.get('test_suite_id')
+        if not test_suite_id:
+            return Response({'error': '请提供 test_suite_id'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        test_suite = TestSuite.objects.filter(id=test_suite_id).first()
+        if test_suite is None:
+            return Response({'error': '测试套件不存在'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        # 权限校验:套件所在项目必须是当前用户可见的项目
+        accessible_projects = ApiProject.objects.filter(
+            models.Q(owner=request.user) | models.Q(members=request.user)
+        )
+        if not test_suite.project_id or not accessible_projects.filter(id=test_suite.project_id).exists():
+            return Response({'error': '无权使用此测试套件'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        if not isinstance(dataset.data, list) or len(dataset.data) == 0:
+            return Response({'error': '数据集为空,无法批量执行'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        environment = test_suite.environment
+        env_id = request.data.get('environment_id')
+        if env_id:
+            environment = Environment.objects.filter(id=env_id).first() or environment
+
+        engine = TestExecutionEngine(
+            test_suite=test_suite,
+            environment=environment,
+            user=request.user,
+            trigger_source='manual',
+            persist_history=True,
+            dataset_override=dataset,
+        )
+        try:
+            execution = engine.run()
+        except Exception as e:
+            logger.exception("数据集批量执行异常")
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        log_operation(
+            operation_type='execute',
+            resource_type='dataset',
+            resource_id=dataset.id,
+            resource_name=dataset.name,
+            user=request.user,
+            description=f'数据集驱动套件「{test_suite.name}」执行(共 {len(dataset.data)} 行)',
+        )
+        return Response(TestExecutionSerializer(execution).data)
+
 
 class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = TestExecution.objects.all()
@@ -1390,6 +1456,57 @@ class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
             'count': steps.count(),
             'results': serializer.data,
         })
+
+    @action(detail=True, methods=['get'], url_path='export-report')
+    def export_report(self, request, pk=None):
+        """导出测试报告(JSON / JUnit XML)
+
+        Query params:
+            fmt      json(默认) / junit(或 xml)
+                     不使用 ``format`` 以免触发 DRF 的 format suffix 内容协商
+            download 1 则以附件形式返回(带 Content-Disposition)
+            include_snapshots  仅 json 格式有效,0 表示剥离请求/响应快照以减小体积
+        """
+        from .reporters import build_report, build_json_report, build_junit_xml
+
+        execution = self.get_object()
+        fmt = (request.query_params.get('fmt') or 'json').lower()
+        if fmt == 'xml':
+            fmt = 'junit'
+        if fmt not in ('json', 'junit'):
+            return Response({'error': f"不支持的格式: {fmt},仅支持 json / junit"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        download = str(request.query_params.get('download', '0')).lower() in ('1', 'true', 'yes')
+        include_snapshots = str(request.query_params.get('include_snapshots', '1')).lower() not in ('0', 'false', 'no')
+
+        suite_name = (execution.test_suite.name if execution.test_suite else 'execution').replace(' ', '_')
+        timestamp = execution.start_time.strftime('%Y%m%d_%H%M%S') if execution.start_time else \
+            execution.created_at.strftime('%Y%m%d_%H%M%S')
+
+        if fmt == 'junit':
+            content = build_junit_xml(execution)
+            filename = f"{suite_name}_{timestamp}.xml"
+            content_type = 'application/xml; charset=utf-8'
+        else:
+            report_dict = build_json_report(execution, include_snapshots=include_snapshots)
+            import json as _json
+            content = _json.dumps(report_dict, ensure_ascii=False, indent=2, default=str)
+            filename = f"{suite_name}_{timestamp}.json"
+            content_type = 'application/json; charset=utf-8'
+
+        # 强制 ASCII 文件名,避免 Django 对非 ASCII header 做 RFC 2047 编码导致
+        # Content-Disposition 在客户端被错误解析;非 ASCII 部分走 RFC 5987 filename*
+        from urllib.parse import quote as _url_quote
+        ascii_filename = filename.encode('ascii', errors='ignore').decode('ascii') or f"report.{fmt}"
+        quoted_filename = _url_quote(filename)
+        response = HttpResponse(content, content_type=content_type)
+        if download:
+            response['Content-Disposition'] = (
+                f'attachment; filename="{ascii_filename}"; '
+                f"filename*=UTF-8''{quoted_filename}"
+            )
+        return response
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):

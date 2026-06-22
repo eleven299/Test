@@ -235,3 +235,34 @@ export function importDatasetCsv(id, file, hasHeader = true, encoding = 'utf-8')
     timeout: 60000
   })
 }
+
+// 用数据集驱动一次测试套件执行(DDT 批量执行)
+export function runDataset(id, data) {
+  return request({
+    url: `/api-testing/datasets/${id}/run/`,
+    method: 'post',
+    data
+  })
+}
+
+// 获取测试套件的简练列表(只含 id/name/project,用于批量执行对话框)
+export function getTestSuitesLite(params) {
+  return request({
+    url: '/api-testing/test-suites/',
+    method: 'get',
+    params
+  })
+}
+
+// 导出测试执行报告(fmt: 'json' | 'junit';download=true 触发文件下载)
+// 注意:不用 ?format= 作为 query param 名,DRF 会把它当作 format suffix 处理,
+// junit 没有对应 renderer 会被内容协商拦截返回 404。
+export function buildExportReportUrl(executionId, format, download = true, includeSnapshots = true) {
+  const params = new URLSearchParams()
+  params.set('fmt', format)
+  params.set('download', download ? '1' : '0')
+  if (format === 'json') {
+    params.set('include_snapshots', includeSnapshots ? '1' : '0')
+  }
+  return `/api-testing/test-executions/${executionId}/export-report/?${params.toString()}`
+}

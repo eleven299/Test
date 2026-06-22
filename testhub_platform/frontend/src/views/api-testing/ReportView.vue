@@ -36,7 +36,7 @@
             {{ formatDate(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('apiTesting.common.operation')" width="220" fixed="right">
+        <el-table-column :label="$t('apiTesting.common.operation')" width="380" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="viewReportDetail(scope.row)">
               {{ $t('apiTesting.report.generateAndViewReport') }}
@@ -44,6 +44,21 @@
             <el-button link type="primary" @click="openStepDrawer(scope.row)">
               {{ $t('apiTesting.report.viewStepDetail') }}
             </el-button>
+            <el-dropdown trigger="click" @command="(cmd) => exportReport(scope.row, cmd)">
+              <el-button link type="success">
+                {{ $t('apiTesting.report.exportReport') }}
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="json">JSON</el-dropdown-item>
+                  <el-dropdown-item command="json_compact">
+                    {{ $t('apiTesting.report.exportJsonCompact') }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="junit">JUnit XML</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -215,11 +230,14 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 
 const { t } = useI18n()
+const route = useRoute()
 const reports = ref([])
 const loading = ref(false)
 
@@ -382,9 +400,62 @@ const formatDate = (dateString) => {
   return dayjs(dateString).format('YYYY-MM-DD HH:mm:ss')
 }
 
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+const exportReport = async (row, command) => {
+  // command: 'json' | 'json_compact' | 'junit'
+  const fmt = command === 'junit' ? 'junit' : 'json'
+  const includeSnapshots = command !== 'json_compact'
+  // 不使用 ?format= (会被 DRF 的 format suffix 拦截)
+  const params = { fmt, download: '1' }
+  if (fmt === 'json') params.include_snapshots = includeSnapshots ? '1' : '0'
+  try {
+    const response = await api.get(`/api-testing/test-executions/${row.id}/export-report/`, {
+      params,
+      responseType: 'blob'
+    })
+    // 优先解析 RFC 5987 filename*=UTF-8''xxx,其次回退到 ASCII filename="xxx"
+    let fileName = `${row.test_suite_name || 'execution'}_${row.id}.${fmt === 'junit' ? 'xml' : 'json'}`
+    const disp = response.headers?.['content-disposition'] || ''
+    const starMatch = disp.match(/filename\*=UTF-8''([^;]+)/i)
+    if (starMatch) {
+      try {
+        fileName = decodeURIComponent(starMatch[1])
+      } catch (_) {
+        fileName = starMatch[1]
+      }
+    } else {
+      const match = disp.match(/filename="?([^";]+)"?/i)
+      if (match) fileName = match[1]
+    }
+    downloadBlob(response.data, fileName)
+    ElMessage.success(t('apiTesting.report.exportSuccess'))
+  } catch (e) {
+    ElMessage.error(t('apiTesting.report.exportFailed'))
+  }
+}
+
 import { onMounted } from 'vue'
-onMounted(() => {
-  loadReports()
+onMounted(async () => {
+  await loadReports()
+  const executionId = route.query.execution
+  if (executionId) {
+    const target = reports.value.find((r) => String(r.id) === String(executionId))
+    if (target) {
+      openStepDrawer(target)
+    } else {
+      ElMessage.info(t('apiTesting.report.executionNotFound'))
+    }
+  }
 })
 </script>
 

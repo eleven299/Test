@@ -593,6 +593,17 @@ export default {
     btnEdit: '编辑信息',
     btnEditData: '编辑数据',
     btnImportCsv: 'CSV 导入',
+    btnRun: '批量执行',
+    runTitle: '批量执行',
+    runHint: '当前数据集共 {rows} 行,选择一个测试套件后,每一行将作为一次迭代执行',
+    runSelectSuite: '测试套件',
+    runSelectSuitePlaceholder: '选择使用本数据集驱动的套件',
+    runSelectSuiteRequired: '请选择测试套件',
+    runEnvironment: '执行环境',
+    runEnvironmentPlaceholder: '可选,留空使用套件默认环境',
+    runEmpty: '数据集为空,无法批量执行',
+    runSuccess: '执行完成,正在跳转报告页',
+    runFailed: '执行失败',
     dataEditorTitle: '数据编辑',
     dataHint: '每一行是一个迭代对象;key 会作为变量名在请求中用 {{key}} 引用',
     emptyHint: '暂无数据,点击「新增一行」开始',
@@ -669,7 +680,12 @@ export default {
     requestSnapshot: '请求快照',
     responseSnapshot: '响应快照',
     iterationSummary: '迭代维度汇总',
-    iterationFilterAll: '全部'
+    iterationFilterAll: '全部',
+    exportReport: '导出',
+    exportJsonCompact: 'JSON (不含快照)',
+    exportSuccess: '报告已导出',
+    exportFailed: '导出失败',
+    executionNotFound: '当前列表未找到该执行记录'
   },
 
   // 通知管理

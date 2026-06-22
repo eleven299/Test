@@ -913,6 +913,58 @@ class EngineResolveDataSetTest(TestCase):
         resolved = engine_module.TestExecutionEngine._resolve_step_data_set(self.step)
         self.assertEqual(resolved, [{'x': 1}])
 
+    def test_override_takes_priority_over_dataset(self):
+        """dataset_override 优先于 step.dataset"""
+        ds_step = TestDataset.objects.create(
+            project=self.project, name='步骤绑定',
+            data=[{'u': 'admin'}], created_by=self.user,
+        )
+        ds_override = TestDataset.objects.create(
+            project=self.project, name='临时覆盖',
+            data=[{'u': 'iter-1'}, {'u': 'iter-2'}],
+            created_by=self.user,
+        )
+        self.step.dataset = ds_step
+        self.step.data_set = [{'inline': True}]
+        self.step.save()
+
+        resolved = engine_module.TestExecutionEngine._resolve_step_data_set(
+            self.step, override_dataset=ds_override
+        )
+        self.assertEqual(resolved, [{'u': 'iter-1'}, {'u': 'iter-2'}])
+
+    def test_empty_override_falls_back_to_step_dataset(self):
+        """dataset_override 为空列表时退回 step.dataset"""
+        ds_step = TestDataset.objects.create(
+            project=self.project, name='步骤绑定',
+            data=[{'u': 'admin'}], created_by=self.user,
+        )
+        ds_override_empty = TestDataset.objects.create(
+            project=self.project, name='空覆盖',
+            data=[], created_by=self.user,
+        )
+        self.step.dataset = ds_step
+        self.step.save()
+
+        resolved = engine_module.TestExecutionEngine._resolve_step_data_set(
+            self.step, override_dataset=ds_override_empty
+        )
+        self.assertEqual(resolved, [{'u': 'admin'}])
+
+    def test_override_none_falls_back_to_step_dataset(self):
+        """dataset_override=None 时退回 step.dataset / inline"""
+        ds_step = TestDataset.objects.create(
+            project=self.project, name='步骤绑定',
+            data=[{'u': 'admin'}], created_by=self.user,
+        )
+        self.step.dataset = ds_step
+        self.step.save()
+
+        resolved = engine_module.TestExecutionEngine._resolve_step_data_set(
+            self.step, override_dataset=None
+        )
+        self.assertEqual(resolved, [{'u': 'admin'}])
+
 
 class TestDatasetSerializerTest(TestCase):
     """TestDatasetSerializer 校验逻辑"""
@@ -1042,4 +1094,311 @@ class TestDatasetViewSetTest(TestCase):
         self.assertIn("'=cmd|calc", values)
         self.assertIn("'+5", values)
         self.assertIn("'@SUM", values)
+
+
+# ================ 端到端:数据集批量执行接口 ================
+
+
+class DatasetRunAPITest(TestCase):
+    """POST /api/api-testing/datasets/{id}/run/ 端到端测试
+
+    通过 mock requests.request 让 engine 不真正发 HTTP 请求,
+    覆盖:空数据集 / 无权限套件 / 正常执行 / 套件不存在 / 缺 test_suite_id。
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = UserModel.objects.create_user(
+            username='ds_run_user', password='x', email='r1@e.com',
+        )
+        cls.other_user = UserModel.objects.create_user(
+            username='ds_run_other', password='x', email='r2@e.com',
+        )
+        cls.project = ApiProject.objects.create(
+            name='Run API 测试项目', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.user,
+        )
+        cls.other_project = ApiProject.objects.create(
+            name='别人的项目 RunAPI', project_type='HTTP', status='IN_PROGRESS',
+            owner=cls.other_user,
+        )
+        cls.suite = TestSuite.objects.create(
+            project=cls.project, name='Run API 套件',
+            created_by=cls.user,
+        )
+        cls.other_suite = TestSuite.objects.create(
+            project=cls.other_project, name='别人套件',
+            created_by=cls.other_user,
+        )
+        # 两个接口都带状态码断言,mock 返回 200 让全部步骤通过
+        cls.req_a = ApiRequest.objects.create(
+            name='A', method='GET', url='https://x/a/{{u}}',
+            headers=[], params={}, body={},
+            assertions=[{'source': 'status_code', 'operator': 'equals', 'expected': 200}],
+            created_by=cls.user,
+        )
+        cls.req_b = ApiRequest.objects.create(
+            name='B', method='POST', url='https://x/b',
+            headers=[], params={}, body={},
+            assertions=[{'source': 'status_code', 'operator': 'equals', 'expected': 200}],
+            created_by=cls.user,
+        )
+        cls.step_a = TestSuiteRequest.objects.create(
+            test_suite=cls.suite, request=cls.req_a, order=1,
+        )
+        cls.step_b = TestSuiteRequest.objects.create(
+            test_suite=cls.suite, request=cls.req_b, order=2,
+        )
+        cls.dataset = TestDataset.objects.create(
+            project=cls.project, name='DDT 数据',
+            data=[{'u': 'alice'}, {'u': 'bob'}, {'u': 'carol'}],
+            created_by=cls.user,
+        )
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(self.user)
+        return c
+
+    def _patch_requests_200(self):
+        mock_resp = mock.MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"ok": true}'
+        mock_resp.headers = {'content-type': 'application/json'}
+        mock_resp.json.return_value = {'ok': True}
+        return mock.patch.object(engine_module.requests_lib, 'request',
+                                  return_value=mock_resp)
+
+    def test_run_dataset_drives_iterations(self):
+        """3 行数据集 + 2 个步骤 = 总 6 次执行,全部通过"""
+        c = self._client()
+        with self._patch_requests_200():
+            r = c.post(
+                f'/api/api-testing/datasets/{self.dataset.id}/run/',
+                {'test_suite_id': self.suite.id},
+                format='json',
+            )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body['status'], 'COMPLETED')
+        self.assertEqual(body['total_requests'], 6)
+        self.assertEqual(body['passed_requests'], 6)
+        self.assertEqual(body['failed_requests'], 0)
+
+        # step_results 应有 6 条,每个步骤 3 个迭代
+        execution_id = body['id']
+        steps = TestStepResult.objects.filter(execution_id=execution_id)
+        self.assertEqual(steps.count(), 6)
+        iterations = sorted({s.iteration for s in steps})
+        self.assertEqual(iterations, [0, 1, 2])
+
+        # step.url 保存的是原始 URL,变量替换后的 URL 在 request_snapshot
+        # 3 行数据集的 u=alice/bob/carol 应被替换到 GET 步骤的实际 URL
+        get_steps = [s for s in steps if s.method == 'GET']
+        actual_urls = {
+            s.request_snapshot.get('url') for s in get_steps
+        }
+        self.assertEqual(actual_urls, {
+            'https://x/a/alice', 'https://x/a/bob', 'https://x/a/carol'
+        })
+
+    def test_run_dataset_does_not_mutate_step_dataset_fk(self):
+        """关键:批量执行不能修改 TestSuiteRequest.dataset 关联"""
+        self.step_a.dataset = None
+        self.step_a.save()
+        c = self._client()
+        with self._patch_requests_200():
+            r = c.post(
+                f'/api/api-testing/datasets/{self.dataset.id}/run/',
+                {'test_suite_id': self.suite.id},
+                format='json',
+            )
+        self.assertEqual(r.status_code, 200, r.content)
+
+        self.step_a.refresh_from_db()
+        self.step_b.refresh_from_db()
+        self.assertIsNone(self.step_a.dataset)
+        self.assertIsNone(self.step_b.dataset)
+
+    def test_run_dataset_empty_data_rejected(self):
+        ds_empty = TestDataset.objects.create(
+            project=self.project, name='空', data=[],
+            created_by=self.user,
+        )
+        c = self._client()
+        r = c.post(
+            f'/api/api-testing/datasets/{ds_empty.id}/run/',
+            {'test_suite_id': self.suite.id},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn('为空', r.json().get('error', ''))
+
+    def test_run_dataset_missing_suite_id(self):
+        c = self._client()
+        r = c.post(
+            f'/api/api-testing/datasets/{self.dataset.id}/run/',
+            {},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 400, r.content)
+
+    def test_run_dataset_suite_not_found(self):
+        c = self._client()
+        r = c.post(
+            f'/api/api-testing/datasets/{self.dataset.id}/run/',
+            {'test_suite_id': 99999999},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 404, r.content)
+
+    def test_run_dataset_other_users_suite_forbidden(self):
+        """用户无权使用别人项目下的套件"""
+        c = self._client()
+        r = c.post(
+            f'/api/api-testing/datasets/{self.dataset.id}/run/',
+            {'test_suite_id': self.other_suite.id},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 403, r.content)
+
+    def test_run_dataset_with_inline_data_set_step_uses_override(self):
+        """步骤原本有 inline data_set,override 应优先于它"""
+        self.step_a.data_set = [{'u': 'inline-default'}]
+        self.step_a.save()
+        c = self._client()
+        with self._patch_requests_200():
+            r = c.post(
+                f'/api/api-testing/datasets/{self.dataset.id}/run/',
+                {'test_suite_id': self.suite.id},
+                format='json',
+            )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(body['total_requests'], 6)  # 3 行 × 2 步
+
+    def test_run_dataset_other_user_cannot_access_dataset(self):
+        """另一个用户看不到本数据集(404)"""
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(self.other_user)
+        r = c.post(
+            f'/api/api-testing/datasets/{self.dataset.id}/run/',
+            {'test_suite_id': self.suite.id},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 404, r.content)
+
+
+# ================ 端到端:报告导出接口 ================
+
+
+class ExportReportAPITest(_ReporterTestBase):
+    """GET /api/api-testing/test-executions/{id}/export-report/ 端到端测试"""
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(self.user)
+        return c
+
+    def test_export_json_returns_application_json(self):
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=json')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('application/json', r['Content-Type'])
+        body = json.loads(r.content.decode('utf-8'))
+        self.assertEqual(body['execution']['id'], execution.id)
+        self.assertEqual(body['summary']['total'], 2)
+        # 默认带快照
+        self.assertIn('request_snapshot', body['steps'][0])
+
+    def test_export_json_without_snapshots(self):
+        execution = self._make_execution()
+        s = execution.step_results.first()
+        s.request_snapshot = {'secret': 'value'}
+        s.response_snapshot = {'body': 'long'}
+        s.save()
+
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=json&include_snapshots=0')
+        self.assertEqual(r.status_code, 200)
+        body = json.loads(r.content.decode('utf-8'))
+        self.assertNotIn('request_snapshot', body['steps'][0])
+        self.assertNotIn('response_snapshot', body['steps'][0])
+
+    def test_export_json_download_has_attachment_header(self):
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=json&download=1')
+        self.assertEqual(r.status_code, 200)
+        disp = r['Content-Disposition']
+        self.assertIn('attachment', disp)
+        self.assertIn('.json', disp)
+
+    def test_export_junit_xml_well_formed(self):
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=junit')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('xml', r['Content-Type'])
+        root = ET.fromstring(r.content)
+        self.assertEqual(root.tag, 'testsuites')
+        suite = root.find('testsuite')
+        self.assertEqual(suite.get('tests'), '2')
+        self.assertEqual(suite.get('failures'), '1')
+
+    def test_export_xml_alias_for_junit(self):
+        """fmt=xml 应被视作 junit"""
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=xml&download=1')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('.xml', r['Content-Disposition'])
+        root = ET.fromstring(r.content)
+        self.assertEqual(root.tag, 'testsuites')
+
+    def test_export_junit_download_header(self):
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=junit&download=1')
+        self.assertEqual(r.status_code, 200)
+        disp = r['Content-Disposition']
+        self.assertIn('attachment', disp)
+        self.assertIn('.xml', disp)
+
+    def test_export_unsupported_format_returns_400(self):
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=pdf')
+        self.assertEqual(r.status_code, 400)
+
+    def test_export_default_format_is_json(self):
+        execution = self._make_execution()
+        c = self._client()
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('application/json', r['Content-Type'])
+
+    def test_export_other_user_forbidden(self):
+        """别的用户看不到本执行记录(404)"""
+        from rest_framework.test import APIClient
+        execution = self._make_execution()
+        other = UserModel.objects.create_user(
+            username='export_other', password='x', email='e@e.com',
+        )
+        c = APIClient()
+        c.force_authenticate(other)
+        r = c.get(f'/api/api-testing/test-executions/{execution.id}/export-report/'
+                  '?fmt=json')
+        self.assertEqual(r.status_code, 404)
 

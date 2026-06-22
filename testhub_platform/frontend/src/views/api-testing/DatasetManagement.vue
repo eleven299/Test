@@ -50,8 +50,11 @@
       <el-table-column :label="$t('apiTesting.dataset.columnUpdatedAt')" width="170">
         <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
       </el-table-column>
-      <el-table-column :label="$t('apiTesting.common.actions')" width="280" fixed="right">
+      <el-table-column :label="$t('apiTesting.common.actions')" width="360" fixed="right">
         <template #default="{ row }">
+          <el-button size="small" type="success" @click="onRun(row)">
+            {{ $t('apiTesting.dataset.btnRun') }}
+          </el-button>
           <el-button size="small" @click="onEditData(row)">{{ $t('apiTesting.dataset.btnEditData') }}</el-button>
           <el-button size="small" type="primary" @click="onEdit(row)">{{ $t('apiTesting.dataset.btnEdit') }}</el-button>
           <el-button size="small" type="info" @click="onImportCsv(row)">{{ $t('apiTesting.dataset.btnImportCsv') }}</el-button>
@@ -194,6 +197,57 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="runDialogVisible"
+      :title="$t('apiTesting.dataset.runTitle') + ' - ' + (currentDataset?.name || '')"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <div class="run-hint">
+        <el-text size="small" type="info">
+          {{ $t('apiTesting.dataset.runHint', { rows: currentDataset?.row_count || 0 }) }}
+        </el-text>
+      </div>
+      <el-form label-width="120px" style="margin-top: 12px;">
+        <el-form-item :label="$t('apiTesting.dataset.runSelectSuite')" required>
+          <el-select
+            v-model="runForm.test_suite_id"
+            :placeholder="$t('apiTesting.dataset.runSelectSuitePlaceholder')"
+            style="width: 100%"
+            filterable
+          >
+            <el-option
+              v-for="s in runnableSuites"
+              :key="s.id"
+              :label="s.name"
+              :value="s.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('apiTesting.dataset.runEnvironment')">
+          <el-select
+            v-model="runForm.environment_id"
+            :placeholder="$t('apiTesting.dataset.runEnvironmentPlaceholder')"
+            style="width: 100%"
+            clearable
+          >
+            <el-option
+              v-for="e in environments"
+              :key="e.id"
+              :label="e.name"
+              :value="e.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="runDialogVisible = false">{{ $t('apiTesting.common.cancel') }}</el-button>
+        <el-button type="success" :loading="running" :disabled="!runForm.test_suite_id" @click="onSubmitRun">
+          {{ $t('apiTesting.dataset.btnRun') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -202,12 +256,15 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Search, UploadFilled } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
   getDatasets, createDataset, updateDataset, deleteDataset,
-  importDatasetCsv, getApiProjects
+  importDatasetCsv, getApiProjects, runDataset,
+  getTestSuitesLite, getEnvironments
 } from '@/api/api-testing'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const projects = ref([])
 const list = ref([])
@@ -250,6 +307,16 @@ const csvFile = ref(null)
 const csvHasHeader = ref(true)
 const csvEncoding = ref('utf-8')
 const csvPreview = ref(null)
+
+// 批量执行数据集
+const runDialogVisible = ref(false)
+const running = ref(false)
+const runnableSuites = ref([])
+const environments = ref([])
+const runForm = reactive({
+  test_suite_id: null,
+  environment_id: null
+})
 
 function formatDate(iso) {
   if (!iso) return ''
@@ -449,6 +516,69 @@ async function onSubmitCsv() {
   }
 }
 
+// ===== 批量执行 =====
+async function loadRunnableSuites(projectId) {
+  if (!projectId) {
+    runnableSuites.value = []
+    return
+  }
+  try {
+    const res = await getTestSuitesLite({ project: projectId, page_size: 200 })
+    runnableSuites.value = res.data?.results || res.data || []
+  } catch (e) {
+    runnableSuites.value = []
+  }
+}
+
+async function loadEnvironments(projectId) {
+  if (!projectId) {
+    environments.value = []
+    return
+  }
+  try {
+    const res = await getEnvironments({ project: projectId, page_size: 200 })
+    environments.value = res.data?.results || res.data || []
+  } catch (e) {
+    environments.value = []
+  }
+}
+
+function onRun(row) {
+  currentDataset.value = row
+  runForm.test_suite_id = null
+  runForm.environment_id = null
+  if (!row.row_count) {
+    ElMessage.warning(t('apiTesting.dataset.runEmpty'))
+    return
+  }
+  loadRunnableSuites(row.project)
+  loadEnvironments(row.project)
+  runDialogVisible.value = true
+}
+
+async function onSubmitRun() {
+  if (!runForm.test_suite_id) {
+    ElMessage.warning(t('apiTesting.dataset.runSelectSuiteRequired'))
+    return
+  }
+  running.value = true
+  try {
+    const payload = { test_suite_id: runForm.test_suite_id }
+    if (runForm.environment_id) payload.environment_id = runForm.environment_id
+    const res = await runDataset(currentDataset.value.id, payload)
+    ElMessage.success(t('apiTesting.dataset.runSuccess'))
+    runDialogVisible.value = false
+    const executionId = res.data?.id
+    if (executionId) {
+      router.push({ name: 'ApiReports', params: {}, query: { execution: executionId } })
+    }
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || t('apiTesting.dataset.runFailed'))
+  } finally {
+    running.value = false
+  }
+}
+
 onMounted(async () => {
   await loadProjects()
   await loadList()
@@ -507,5 +637,12 @@ onMounted(async () => {
 
 .csv-preview {
   margin-top: 12px;
+}
+
+.run-hint {
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-left: 3px solid #409eff;
+  border-radius: 4px;
 }
 </style>

@@ -581,6 +581,17 @@ export default {
     btnEdit: 'Edit Info',
     btnEditData: 'Edit Data',
     btnImportCsv: 'Import CSV',
+    btnRun: 'Run',
+    runTitle: 'Batch Run',
+    runHint: 'Dataset has {rows} rows. Pick a suite to run; each row becomes one iteration.',
+    runSelectSuite: 'Test Suite',
+    runSelectSuitePlaceholder: 'Select a suite to drive with this dataset',
+    runSelectSuiteRequired: 'Please select a test suite',
+    runEnvironment: 'Environment',
+    runEnvironmentPlaceholder: 'Optional, override suite default',
+    runEmpty: 'Dataset is empty, nothing to run',
+    runSuccess: 'Execution started, redirecting to reports',
+    runFailed: 'Execution failed',
     dataEditorTitle: 'Data Editor',
     dataHint: 'Each row is an iteration object; keys become variables you can reference as {{key}}',
     emptyHint: 'No data yet. Click "Add Row" to start',
@@ -657,7 +668,12 @@ export default {
     requestSnapshot: 'Request Snapshot',
     responseSnapshot: 'Response Snapshot',
     iterationSummary: 'Iteration Summary',
-    iterationFilterAll: 'All'
+    iterationFilterAll: 'All',
+    exportReport: 'Export',
+    exportJsonCompact: 'JSON (no snapshots)',
+    exportSuccess: 'Report exported',
+    exportFailed: 'Export failed',
+    executionNotFound: 'Target execution was not found in the current list'
   },
 
   // Notification Management

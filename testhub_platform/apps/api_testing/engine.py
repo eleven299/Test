@@ -319,12 +319,14 @@ class TestExecutionEngine:
                  environment: Optional[Any] = None,
                  user: Optional[Any] = None,
                  trigger_source: str = 'manual',
-                 persist_history: bool = True):
+                 persist_history: bool = True,
+                 dataset_override: Optional[Any] = None):
         self.test_suite = test_suite
         self.environment = environment
         self.user = user
         self.trigger_source = trigger_source
         self.persist_history = persist_history
+        self.dataset_override = dataset_override
 
         self.context = VariableContext()
         self.extractor = VariableExtractor()
@@ -383,7 +385,10 @@ class TestExecutionEngine:
         ).select_related('request', 'dataset').order_by('order'))
 
         # 计算含 DDT 迭代的总请求数
-        expanded_counts = [len(self._normalize_data_set(self._resolve_step_data_set(s))) for s in steps]
+        expanded_counts = [
+            len(self._normalize_data_set(self._resolve_step_data_set(s, self.dataset_override)))
+            for s in steps
+        ]
         self.total_count = sum(expanded_counts) if expanded_counts else 0
         execution.total_requests = self.total_count
         execution.save()
@@ -398,9 +403,9 @@ class TestExecutionEngine:
                 self._mark_skipped(execution, step)
                 continue
 
-            # DDT: dataset 优先于内联 data_set;都为空时单次执行(iteration=0)
+            # DDT: dataset_override > step.dataset > step.data_set;都为空时单次执行(iteration=0)
             # 非空时按行迭代,每行 push 一次 iteration scope
-            resolved_data_set = self._resolve_step_data_set(step)
+            resolved_data_set = self._resolve_step_data_set(step, self.dataset_override)
             data_rows = self._normalize_data_set(resolved_data_set)
 
             for iter_idx, row_vars in enumerate(data_rows):
@@ -458,15 +463,21 @@ class TestExecutionEngine:
         return normalized
 
     @staticmethod
-    def _resolve_step_data_set(step: TestSuiteRequest):
+    def _resolve_step_data_set(step: TestSuiteRequest,
+                                override_dataset: Optional[Any] = None):
         """合并步骤的独立数据集与内联数据集。
 
-        合并语义:
+        合并语义(优先级从高到低):
+        - override_dataset 非空且 data 非空 → 用 override_dataset.data
+          (由 dataset/run 接口传入,用于"数据集批量执行"场景,不改库)
         - dataset FK 非空且 data 非空 → 用 dataset.data
         - dataset.data 为空 → 退回 inline data_set
         - dataset FK 为空 → 用 inline data_set
         - 两者都为空 → 返回 None(由 _normalize_data_set 视为单次执行)
         """
+        if override_dataset is not None and isinstance(override_dataset.data, list) \
+                and len(override_dataset.data) > 0:
+            return override_dataset.data
         dataset = getattr(step, 'dataset', None)
         if dataset is not None and isinstance(dataset.data, list) and len(dataset.data) > 0:
             return dataset.data
