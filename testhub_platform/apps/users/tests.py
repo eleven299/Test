@@ -76,3 +76,179 @@ class UserDetailAccessTest(TestCase):
         resp = client.get(f'/api/users/users/{me.id}/')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['username'], 'me')
+
+
+class LoginViewExtraTest(TestCase):
+    """login_view 异常路径。"""
+
+    def test_wrong_password_rejected(self):
+        User.objects.create_user(username='alice', password='secret123')
+        c = APIClient()
+        resp = c.post('/api/auth/login/',
+                       {'username': 'alice', 'password': 'wrong'},
+                       format='json')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_missing_username_rejected(self):
+        c = APIClient()
+        resp = c.post('/api/auth/login/', {'password': 'x'}, format='json')
+        self.assertEqual(resp.status_code, 400)
+
+
+class LogoutViewTest(TestCase):
+    """logout_view 默认 IsAuthenticated,未登录返回 401;登录后返回 200。"""
+
+    def test_unauthenticated_returns_401(self):
+        c = APIClient()
+        resp = c.post('/api/auth/logout/')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_authenticated_logout_without_refresh_returns_200(self):
+        user = User.objects.create_user(username='u', password='x')
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.post('/api/auth/logout/')
+        self.assertEqual(resp.status_code, 200)
+
+
+class ProfileViewTest(TestCase):
+    """/api/auth/profile/ 登录态校验。"""
+
+    def test_unauthenticated_returns_401(self):
+        c = APIClient()
+        resp = c.get('/api/auth/profile/')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_authenticated_returns_self(self):
+        user = User.objects.create_user(username='u', password='x')
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get('/api/auth/profile/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['username'], 'u')
+
+
+class GetCurrentUserTest(TestCase):
+    """/api/users/me/ 端点。"""
+
+    def test_unauthenticated_returns_401(self):
+        c = APIClient()
+        resp = c.get('/api/users/me/')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_authenticated_returns_self(self):
+        user = User.objects.create_user(username='u', password='x')
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get('/api/users/me/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['username'], 'u')
+
+
+class UserListViewTest(TestCase):
+    """UserListView 认证用户可访问。"""
+
+    def test_unauthenticated_rejected(self):
+        c = APIClient()
+        resp = c.get('/api/users/users/')
+        # DRF 默认 401 (未登录)
+        self.assertIn(resp.status_code, (401, 403))
+
+    def test_authenticated_returns_user_list(self):
+        User.objects.create_user(username='alice', password='x')
+        User.objects.create_user(username='bob', password='x')
+        me = User.objects.create_user(username='me', password='x')
+        c = APIClient()
+        c.force_authenticate(user=me)
+        resp = c.get('/api/users/users/')
+        self.assertEqual(resp.status_code, 200)
+        page = resp.data.get('results', resp.data)
+        usernames = {u['username'] for u in page}
+        self.assertEqual(usernames, {'alice', 'bob', 'me'})
+
+
+class UserDetailAdminTest(TestCase):
+    """P0 数据隔离:is_staff 用户可读他人信息;普通用户 404。"""
+
+    def test_staff_can_read_other_users(self):
+        admin = User.objects.create_user(
+            username='admin', password='x', is_staff=True,
+        )
+        other = User.objects.create_user(username='other', password='x')
+        c = APIClient()
+        c.force_authenticate(user=admin)
+        resp = c.get(f'/api/users/users/{other.id}/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['username'], 'other')
+
+
+class SendRegisterCodeValidationTest(TestCase):
+    """send_register_code 输入校验:所有路径在调 Redis 之前返回 400。"""
+
+    def test_missing_phone_rejects(self):
+        c = APIClient()
+        resp = c.post('/api/auth/send-register-code/', {
+            'captcha_token': 't', 'captcha_code': 'c',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('手机号', resp.data['error'])
+
+    def test_missing_captcha_rejects(self):
+        c = APIClient()
+        resp = c.post('/api/auth/send-register-code/', {
+            'phone': '13800138000',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('图形验证码', resp.data['error'])
+
+    def test_login_mode_unregistered_phone_rejects(self):
+        c = APIClient()
+        resp = c.post('/api/auth/send-register-code/', {
+            'phone': '13800138000',
+            'captcha_token': 't', 'captcha_code': 'c',
+            'mode': 'login',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('未注册', resp.data['error'])
+
+    def test_register_mode_already_registered_phone_rejects(self):
+        User.objects.create_user(
+            username='u', password='x', phone='13800138000',
+        )
+        c = APIClient()
+        resp = c.post('/api/auth/send-register-code/', {
+            'phone': '13800138000',
+            'captcha_token': 't', 'captcha_code': 'c',
+            'mode': 'register',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('已被注册', resp.data['error'])
+
+
+class SmsLoginValidationTest(TestCase):
+    """sms_login_view 输入校验:手机号/验证码格式不正确在调 Redis 前返回 400。"""
+
+    def test_missing_phone_rejects(self):
+        c = APIClient()
+        resp = c.post('/api/auth/sms-login/', {
+            'verify_code': '1234', 'verify_code_token': 't',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('手机号', resp.data['error'])
+
+    def test_invalid_phone_format_rejects(self):
+        c = APIClient()
+        resp = c.post('/api/auth/sms-login/', {
+            'phone': '12345',
+            'verify_code': '1234', 'verify_code_token': 't',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('格式不正确', resp.data['error'])
+
+    def test_missing_verify_code_rejects(self):
+        c = APIClient()
+        resp = c.post('/api/auth/sms-login/', {
+            'phone': '13800138000',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('短信验证码', resp.data['error'])
