@@ -13,6 +13,7 @@ from django.db.models import Q, Count
 from django.utils import timezone
 from django.http import HttpResponse
 from django.core.cache import cache
+from django.http import Http404
 from django.views.decorators.csrf import csrf_exempt
 from asgiref.sync import sync_to_async
 import asyncio
@@ -163,18 +164,18 @@ class DataFactoryViewSet(viewsets.ModelViewSet):
             # 使用self.get_object()获取记录，它会自动处理权限过滤
             instance = self.get_object()
             logger.info(f'成功获取记录: ID={instance.id}, 用户ID={instance.user.id}')
-            
+
             # 删除记录
             instance.delete()
             logger.info(f'成功删除记录: ID={kwargs.get("pk")}')
-            
+
             # 清除相关缓存
             self.clear_user_cache(request.user.id)
             logger.info(f'成功清除缓存: 用户ID={request.user.id}')
-            
+
             return Response({'message': '删除成功'}, status=status.HTTP_200_OK)
-        except DataFactoryRecord.DoesNotExist:
-            logger.error(f'记录不存在: ID={kwargs.get("pk")}, 用户ID={request.user.id}')
+        except Http404:
+            # get_object() 在记录不存在或被 get_queryset 过滤掉时抛 Http404
             return Response({'error': '记录不存在'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.error(f'删除记录失败: {str(e)}, ID={kwargs.get("pk")}, 用户ID={request.user.id}', exc_info=True)
