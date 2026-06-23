@@ -133,102 +133,25 @@ class AIService:
             }
             
         except Exception as e:
-            logger.error(f"先进需求分析失败: {e}")
-            logger.info("使用备用分析方法")
-            # fallback到原来的分析逻辑
+            logger.exception("先进需求分析失败,转入兜底逻辑")
+            # 兜底逻辑会明确抛错(返回假数据会误导用户),这里直接传播
             return await AIService._fallback_analyze_requirements(text, document_title)
     
     @staticmethod
     async def _fallback_analyze_requirements(text: str, document_title: str = "") -> Dict[str, Any]:
-        """备用需求分析方法"""
-        # 模拟AI分析过程
-        await asyncio.sleep(2)
-        
-        # 这里应该调用真实的大模型API
-        # 现在返回改进的模拟数据
-        analysis_report = f"""
-# 需求分析报告
+        """备用需求分析方法。
 
-## 文档概述
-基于提供的需求文档"{document_title}"，共识别出以下主要需求模块和功能点。
+        历史实现这里返回硬编码的 REQ-001/002/003 假数据,会让用户误以为
+        AI 分析成功了。现在直接抛错,由上层决定如何处理(显示错误提示 /
+        保留文档但不创建需求)。
 
-## 主要功能模块
-1. 用户管理模块
-2. 数据处理模块  
-3. 报告生成模块
-4. 系统配置模块
-
-## 详细需求分析
-基于文档内容分析，识别出以下具体需求：
-
-### 功能需求
-- 用户认证和权限管理
-- 数据录入和维护功能
-- 业务流程处理
-- 报表和统计功能
-
-### 非功能需求
-- 系统性能要求：响应时间 < 3秒
-- 安全性要求：数据加密存储
-- 可用性要求：99.5%系统可用率
-- 兼容性要求：支持主流浏览器
-
-## 风险评估
-- 技术实现风险：中等
-- 进度风险：低
-- 资源风险：低
-
-## 建议
-建议采用敏捷开发模式，分阶段实施各功能模块。
-
-分析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        上层捕获到 RuntimeError 时应返回类似:
+            "需求分析失败:AI 服务不可用,请检查模型配置后重试"
         """
-        
-        # 生成基础的结构化需求
-        requirements = [
-            {
-                "requirement_id": "REQ-001",
-                "requirement_name": "用户认证管理", 
-                "requirement_type": "functional",
-                "parent_requirement": None,
-                "module": "用户管理",
-                "requirement_level": "high",
-                "reviewer": "admin",
-                "estimated_hours": 16,
-                "description": "作为一名系统用户，我希望通过用户名和密码登录系统，这样可以确保系统安全性并获得个性化服务。",
-                "acceptance_criteria": "用户能够使用有效凭证成功登录系统，无效凭证登录失败，系统记录登录日志。"
-            },
-            {
-                "requirement_id": "REQ-002",
-                "requirement_name": "数据管理功能",
-                "requirement_type": "functional", 
-                "parent_requirement": None,
-                "module": "数据管理",
-                "requirement_level": "high",
-                "reviewer": "admin",
-                "estimated_hours": 24,
-                "description": "作为一名数据操作员，我希望能够对系统数据进行增删改查操作，这样可以有效管理业务信息。",
-                "acceptance_criteria": "数据操作功能正常，数据完整性得到保证，操作权限控制有效。"
-            },
-            {
-                "requirement_id": "REQ-003",
-                "requirement_name": "报表统计功能",
-                "requirement_type": "functional",
-                "parent_requirement": None,
-                "module": "报表管理",
-                "requirement_level": "medium", 
-                "reviewer": "admin",
-                "estimated_hours": 20,
-                "description": "作为一名管理人员，我希望能够生成各类业务报表和统计图表，这样可以直观了解业务数据和趋势。",
-                "acceptance_criteria": "系统能够生成多种格式的报表，数据准确，支持导出功能。"
-            }
-        ]
-        
-        return {
-            "analysis_report": analysis_report,
-            "requirements": requirements,
-            "requirements_count": len(requirements)
-        }
+        raise RuntimeError(
+            "AI 需求分析不可用:未配置可用模型或调用失败,请先在"
+            "「AI模型配置」中启用一个 writer 角色的模型"
+        )
     
     @staticmethod
     async def generate_test_cases(requirement: BusinessRequirement, test_level: str, test_priority: str, count: int) -> List[Dict[str, Any]]:

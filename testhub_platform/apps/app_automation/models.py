@@ -767,6 +767,21 @@ class AppScheduledTask(models.Model):
             return False
         return timezone.now() >= self.next_run_time
 
+    def update_run_stats(self, success=True):
+        """更新运行统计(原子自增,防止并发竞争丢失计数)"""
+        from django.db.models import F
+        updates = {
+            'total_runs': F('total_runs') + 1,
+            'last_run_time': timezone.now(),
+            'next_run_time': self.calculate_next_run(),
+        }
+        if success:
+            updates['successful_runs'] = F('successful_runs') + 1
+        else:
+            updates['failed_runs'] = F('failed_runs') + 1
+        type(self).objects.filter(pk=self.pk).update(**updates)
+        self.refresh_from_db()
+
 
 class AppNotificationLog(models.Model):
     """APP自动化通知日志"""

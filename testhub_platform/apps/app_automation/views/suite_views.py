@@ -84,7 +84,8 @@ class AppTestSuiteViewSet(viewsets.ModelViewSet):
             return Response({'success': True, 'data': serializer.data},
                             status=status.HTTP_201_CREATED)
         except Exception as e:
-            return Response({'success': False, 'message': str(e)},
+            logger.exception('Exception')
+            return Response({'success': False, 'message': '操作失败'},
                             status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])
@@ -149,7 +150,8 @@ class AppTestSuiteViewSet(viewsets.ModelViewSet):
                 ).update(order=item['order'])
             return Response({'success': True, 'message': '顺序更新成功'})
         except Exception as e:
-            return Response({'success': False, 'message': str(e)},
+            logger.exception('Exception')
+            return Response({'success': False, 'message': '操作失败'},
                             status=status.HTTP_400_BAD_REQUEST)
 
     # ---------- 套件执行 ----------
@@ -228,7 +230,7 @@ class AppTestSuiteViewSet(viewsets.ModelViewSet):
             logger.error(f"执行套件失败: {str(e)}", exc_info=True)
             suite.execution_status = 'failed'
             suite.save(update_fields=['execution_status'])
-            return Response({'success': False, 'message': f'执行失败: {str(e)}'},
+            return Response({'success': False, 'message': '执行失败'},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['get'])

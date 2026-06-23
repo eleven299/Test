@@ -97,54 +97,32 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
             # 异步执行分析
             def run_analysis():
                 try:
-                    # 简化版同步分析
-                    # 提取文档文本
+                    # 提取文档文本(若尚未提取)
                     if not document.extracted_text:
                         document.extracted_text = DocumentProcessor.extract_text(document)
                         document.save()
 
-                    # 创建模拟分析结果
-                    analysis_result = {
-                        'analysis_report': f'对文档"{document.title}"的需求分析已完成。\n\n文档内容：{document.extracted_text[:200]}...\n\n识别到若干功能性需求。',
-                        'requirements_count': 2,
-                        'requirements': [
-                            {
-                                'requirement_id': 'REQ001',
-                                'requirement_name': '基础功能需求',
-                                'requirement_type': 'functional',
-                                'module': '核心模块',
-                                'requirement_level': 'high',
-                                'estimated_hours': 8,
-                                'description': '基于文档内容识别的功能需求',
-                                'acceptance_criteria': '功能正常运行，满足用户需求'
-                            },
-                            {
-                                'requirement_id': 'REQ002',
-                                'requirement_name': '用户交互需求',
-                                'requirement_type': 'usability',
-                                'module': '前端模块',
-                                'requirement_level': 'medium',
-                                'estimated_hours': 6,
-                                'description': '用户界面和交互相关需求',
-                                'acceptance_criteria': '界面友好，操作简单'
-                            }
-                        ]
-                    }
+                    # 调用真实 AI 分析;未配置模型时会抛错,由外层捕获
+                    import asyncio
+                    from .services import AIService
+                    analysis_result = asyncio.run(
+                        AIService.analyze_requirements(
+                            document.extracted_text or '',
+                            document_title=document.title,
+                        )
+                    )
 
                     # 创建分析记录
                     analysis = RequirementAnalysis.objects.create(
                         document=document,
-                        analysis_report=analysis_result['analysis_report'],
-                        requirements_count=analysis_result['requirements_count'],
-                        analysis_time=2.5
+                        analysis_report=analysis_result.get('analysis_report', ''),
+                        requirements_count=analysis_result.get('requirements_count', 0),
+                        analysis_time=analysis_result.get('analysis_time') or 0,
                     )
 
                     # 保存需求数据
-                    for req_data in analysis_result['requirements']:
-                        BusinessRequirement.objects.create(
-                            analysis=analysis,
-                            **req_data
-                        )
+                    for req_data in analysis_result.get('requirements', []):
+                        BusinessRequirement.objects.create(analysis=analysis, **req_data)
 
                     # 更新文档状态
                     document.status = 'analyzed'
@@ -153,7 +131,7 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
                     return analysis
 
                 except Exception as e:
-                    logger.error(f"分析失败: {e}")
+                    logger.exception("需求分析失败")
                     document.status = 'failed'
                     document.save()
                     raise e
@@ -167,9 +145,9 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"分析文档时出错: {e}")
+            logger.exception("分析文档时出错")
             return Response(
-                {'error': f'分析失败: {str(e)}'},
+                {'error': '需求分析失败,请检查 AI 模型配置后重试'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -646,56 +624,33 @@ def upload_and_analyze(request):
 
         def run_analysis():
             try:
-                # 简化版同步分析
-                # 提取文档文本
+                # 提取文档文本(若尚未提取)
                 if not document.extracted_text:
                     document.extracted_text = DocumentProcessor.extract_text(document)
                     document.save()
 
-                # 创建模拟分析结果
-                analysis_result = {
-                    'analysis_report': f'对文档"{document.title}"的需求分析已完成。\n\n文档内容：{document.extracted_text[:200]}...\n\n识别到若干功能性需求。',
-                    'requirements_count': 2,
-                    'requirements': [
-                        {
-                            'requirement_id': 'REQ001',
-                            'requirement_name': '基础功能需求',
-                            'requirement_type': 'functional',
-                            'module': '核心模块',
-                            'requirement_level': 'high',
-                            'estimated_hours': 8,
-                            'description': '基于文档内容识别的功能需求',
-                            'acceptance_criteria': '功能正常运行，满足用户需求'
-                        },
-                        {
-                            'requirement_id': 'REQ002',
-                            'requirement_name': '用户交互需求',
-                            'requirement_type': 'usability',
-                            'module': '前端模块',
-                            'requirement_level': 'medium',
-                            'estimated_hours': 6,
-                            'description': '用户界面和交互相关需求',
-                            'acceptance_criteria': '界面友好，操作简单'
-                        }
-                    ]
-                }
-
-                # 创建分析记录
-                analysis = RequirementAnalysis.objects.create(
-                    document=document,
-                    analysis_report=analysis_result['analysis_report'],
-                    requirements_count=analysis_result['requirements_count'],
-                    analysis_time=2.5
+                # 调用真实 AI 分析(若未配置模型会抛错并被外层捕获)
+                import asyncio
+                from .services import AIService
+                analysis_result = asyncio.run(
+                    AIService.analyze_requirements(
+                        document.extracted_text or '',
+                        document_title=document.title,
+                    )
                 )
 
-                # 保存需求数据
-                for req_data in analysis_result['requirements']:
-                    BusinessRequirement.objects.create(
-                        analysis=analysis,
-                        **req_data
-                    )
+                # 持久化分析结果
+                analysis = RequirementAnalysis.objects.create(
+                    document=document,
+                    analysis_report=analysis_result.get('analysis_report', ''),
+                    requirements_count=analysis_result.get('requirements_count', 0),
+                    analysis_time=analysis_result.get('analysis_time') or 0,
+                )
 
-                # 更新文档状态
+                # 保存结构化需求
+                for req_data in analysis_result.get('requirements', []):
+                    BusinessRequirement.objects.create(analysis=analysis, **req_data)
+
                 document.status = 'analyzed'
                 document.save()
 
@@ -718,7 +673,7 @@ def upload_and_analyze(request):
 
     except Exception as e:
         logger.error(f"上传并分析失败: {e}")
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @csrf_exempt
@@ -746,48 +701,24 @@ def analyze_text(request):
 
         def run_analysis():
             try:
-                # 创建模拟分析结果
-                analysis_result = {
-                    'analysis_report': f'对需求"{title}"的分析已完成。\n\n需求描述：{description[:200]}...\n\n识别到若干功能性需求。',
-                    'requirements_count': 2,
-                    'requirements': [
-                        {
-                            'requirement_id': 'REQ001',
-                            'requirement_name': '基础功能需求',
-                            'requirement_type': 'functional',
-                            'module': '核心模块',
-                            'requirement_level': 'high',
-                            'estimated_hours': 8,
-                            'description': f'基于需求描述识别的功能需求：{description[:100]}...',
-                            'acceptance_criteria': '功能正常运行，满足用户需求'
-                        },
-                        {
-                            'requirement_id': 'REQ002',
-                            'requirement_name': '用户交互需求',
-                            'requirement_type': 'usability',
-                            'module': '前端模块',
-                            'requirement_level': 'medium',
-                            'estimated_hours': 6,
-                            'description': '用户界面和交互相关需求',
-                            'acceptance_criteria': '界面友好，操作简单'
-                        }
-                    ]
-                }
+                # 调用真实 AI 分析;未配置模型会抛错,由外层捕获并提示用户
+                import asyncio
+                from .services import AIService
+                analysis_result = asyncio.run(
+                    AIService.analyze_requirements(description, title)
+                )
 
                 # 创建分析记录
                 analysis = RequirementAnalysis.objects.create(
                     document=document,
-                    analysis_report=analysis_result['analysis_report'],
-                    requirements_count=analysis_result['requirements_count'],
-                    analysis_time=1.5
+                    analysis_report=analysis_result.get('analysis_report', ''),
+                    requirements_count=analysis_result.get('requirements_count', 0),
+                    analysis_time=analysis_result.get('analysis_time') or 0,
                 )
 
                 # 保存需求数据
-                for req_data in analysis_result['requirements']:
-                    BusinessRequirement.objects.create(
-                        analysis=analysis,
-                        **req_data
-                    )
+                for req_data in analysis_result.get('requirements', []):
+                    BusinessRequirement.objects.create(analysis=analysis, **req_data)
 
                 # 更新文档状态
                 document.status = 'analyzed'
@@ -796,7 +727,7 @@ def analyze_text(request):
                 return analysis
 
             except Exception as e:
-                logger.error(f"分析失败: {e}")
+                logger.exception("需求分析失败")
                 document.status = 'failed'
                 document.save()
                 raise e
@@ -812,7 +743,7 @@ def analyze_text(request):
 
     except Exception as e:
         logger.error(f"文本分析失败: {e}")
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @csrf_exempt
@@ -882,58 +813,9 @@ def analyze_text(request):
                 return analysis
 
             except Exception as e:
-                logger.error(f"先进分析失败: {e}，使用备用分析")
-                # fallback到简单分析
-                analysis_result = {
-                    'analysis_report': f'对需求"{title}"的分析已完成。\n\n需求描述：{description[:200]}...\n\n基于描述内容识别到若干功能性需求。',
-                    'requirements_count': 2,
-                    'requirements': [
-                        {
-                            'requirement_id': 'REQ001',
-                            'requirement_name': title + ' - 核心功能',
-                            'requirement_type': 'functional',
-                            'module': '核心模块',
-                            'requirement_level': 'high',
-                            'estimated_hours': 8,
-                            'description': description[:100] + '...',
-                            'acceptance_criteria': '功能正常运行，满足用户需求'
-                        },
-                        {
-                            'requirement_id': 'REQ002',
-                            'requirement_name': title + ' - 交互功能',
-                            'requirement_type': 'usability',
-                            'module': '前端模块',
-                            'requirement_level': 'medium',
-                            'estimated_hours': 6,
-                            'description': '用户界面和交互相关需求',
-                            'acceptance_criteria': '界面友好，操作简单'
-                        }
-                    ]
-                }
-
-                # 创建分析记录
-                analysis = RequirementAnalysis.objects.create(
-                    document=document,
-                    analysis_report=analysis_result['analysis_report'],
-                    requirements_count=analysis_result['requirements_count'],
-                    analysis_time=1.5
-                )
-
-                # 保存需求数据
-                for req_data in analysis_result['requirements']:
-                    BusinessRequirement.objects.create(
-                        analysis=analysis,
-                        **req_data
-                    )
-
-                # 更新文档状态
-                document.status = 'analyzed'
-                document.save()
-
-                return analysis
-
-            except Exception as e:
-                logger.error(f"分析失败: {e}")
+                # AI 分析失败时不再编造 REQ001/REQ002 假数据,直接标记失败
+                # 让用户���知"AI 没配好",而不是误以为分析成功
+                logger.exception("需求分析失败")
                 document.status = 'failed'
                 document.save()
                 raise e
@@ -949,7 +831,7 @@ def analyze_text(request):
 
     except Exception as e:
         logger.error(f"文本分析失败: {e}")
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AIModelConfigViewSet(viewsets.ModelViewSet):
@@ -1165,8 +1047,7 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
             logger.info(f"模型类型: {config.model_type}")
             logger.info(f"模型名称: {config.model_name}")
             logger.info(f"API URL: {config.base_url}")
-            logger.info(
-                f"API Key前缀: {config.api_key[:10]}..." if len(config.api_key) > 10 else f"API Key: {config.api_key}")
+            # 不再记录 API Key 任何片段(前 10 位已足以被中间人/日志读者还原高风险)
 
             # 准备测试消息
             test_messages = [
@@ -1235,11 +1116,20 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def enable(self, request, pk=None):
-        """启用配置"""
+        """启用配置(同用户同角色互斥,保证只有一个 active)"""
+        from django.db import transaction
         try:
-            config = self.get_object()
-            config.is_active = True
-            config.save()
+            with transaction.atomic():
+                config = self.get_object()
+                # 关闭该用户同角色的其他活跃配置
+                AIModelConfig.objects.filter(
+                    role=config.role,
+                    is_active=True,
+                    created_by=request.user
+                ).exclude(pk=config.pk).update(is_active=False)
+                if not config.is_active:
+                    AIModelConfig.objects.filter(pk=config.pk).update(is_active=True)
+                    config.refresh_from_db()
             return Response({
                 'message': 'AI模型配置已启用',
                 'id': config.id,
@@ -1550,8 +1440,10 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
             reviewer_prompt = None
 
             if validated_data.get('use_writer_model', True):
-                # 优先查找任意启用的编写模型配置
-                writer_config = AIModelConfig.objects.filter(role='writer', is_active=True).first()
+                # 仅查询当前用户创建的配置,防止跨用户盗用 API Key
+                writer_config = AIModelConfig.objects.filter(
+                    role='writer', is_active=True, created_by=request.user
+                ).first()
 
                 if not writer_config:
                     return Response(
@@ -1567,8 +1459,10 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                     )
 
             if validated_data.get('use_reviewer_model', True):
-                # 优先查找任意启用的评审模型配置
-                reviewer_config = AIModelConfig.objects.filter(role='reviewer', is_active=True).first()
+                # 仅查询当前用户创建的配置,防止跨用户盗用 API Key
+                reviewer_config = AIModelConfig.objects.filter(
+                    role='reviewer', is_active=True, created_by=request.user
+                ).first()
 
                 if not reviewer_config:
                     return Response(
@@ -3314,10 +3208,13 @@ class ConfigStatusViewSet(viewsets.ViewSet):
     def check(self, request):
         """检查AI配置状态"""
         try:
-            # 检查AI模型配置
-            ai_model_configs = AIModelConfig.objects.filter(
+            # 检查AI模型配置(认证用户仅看到自己的配置,匿名时回退为系统级)
+            base_qs = AIModelConfig.objects.filter(
                 role__in=['writer', 'reviewer']
             ).exclude(role__in=['browser_use_text', 'browser_use_vision'])
+            if request.user and request.user.is_authenticated:
+                base_qs = base_qs.filter(created_by=request.user)
+            ai_model_configs = base_qs
 
             # 检查writer模型配置
             writer_model_enabled = ai_model_configs.filter(

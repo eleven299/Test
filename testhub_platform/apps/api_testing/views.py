@@ -115,13 +115,14 @@ class ApiProjectViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], url_path='create-sample')
     def create_sample_project(self, request):
-        """创建示例项目（宠物店）"""
-        if ApiProject.objects.filter(name='宠物店API示例项目').exists():
-            return Response({'message': '示例项目已存在'}, status=status.HTTP_400_BAD_REQUEST)
-        
+        """创建示例项目（宠物店）- 每个用户只能拥有一份示例项目"""
+        sample_name = '宠物店API示例项目'
+        if ApiProject.objects.filter(name=sample_name, owner=request.user).exists():
+            return Response({'message': '您已创建过示例项目'}, status=status.HTTP_400_BAD_REQUEST)
+
         # 创建示例项目
         project = ApiProject.objects.create(
-            name='宠物店API示例项目',
+            name=sample_name,
             description='参考Apifox宠物店示例，包含用户管理、宠物管理、订单管理等接口',
             project_type='HTTP',
             status='IN_PROGRESS',
@@ -239,11 +240,12 @@ class ApiCollectionViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        # 一次性 prefetch 所有后代集合,避免 SerializerMethodField 递归触发 N+1
         return ApiCollection.objects.filter(
             project__in=ApiProject.objects.filter(
                 models.Q(owner=user) | models.Q(members=user)
             )
-        ).distinct()
+        ).prefetch_related('children').distinct()
 
     def perform_create(self, serializer):
         """创建集合时记录日志"""
@@ -364,7 +366,14 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
         environment_id = request.data.get('environment_id')
         environment = None
         if environment_id:
-            environment = Environment.objects.filter(id=environment_id).first()
+            # 仅允许使用当前用户可见的环境(GLOBAL 或其项目的 LOCAL)
+            visible_envs = EnvironmentViewSet(request=request).get_queryset()
+            environment = visible_envs.filter(id=environment_id).first()
+            if environment is None:
+                return Response(
+                    {'error': '环境不存在或无权使用'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
         # 前端字段覆盖(仅作用于本次执行,不写库)
         override_fields = ('params', 'headers', 'body', 'method', 'url',
@@ -428,23 +437,33 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def activate(self, request, pk=None):
-        """激活环境"""
+        """激活环境(用户级互斥:仅影响当前用户的同作用域环境)"""
+        from django.db import transaction
+
         environment = self.get_object()
-        
-        # 如果是局部环境，取消同项目下其他环境的激活状态
-        if environment.scope == 'LOCAL' and environment.project:
-            Environment.objects.filter(
-                project=environment.project,
-                scope='LOCAL'
-            ).update(is_active=False)
-        # 如果是全局环境，取消其他全局环境的激活状态
-        elif environment.scope == 'GLOBAL':
-            Environment.objects.filter(scope='GLOBAL').update(is_active=False)
-        
-        environment.is_active = True
-        environment.save()
-        
-        return Response({'message': '环境已激活'})
+
+        with transaction.atomic():
+            # 选中当前用户创建的同作用域环境并加锁,防止并发激活竞争
+            user_envs = Environment.objects.select_for_update().filter(created_by=request.user)
+            if environment.scope == 'LOCAL' and environment.project_id:
+                user_envs = user_envs.filter(scope='LOCAL', project_id=environment.project_id)
+            elif environment.scope == 'GLOBAL':
+                user_envs = user_envs.filter(scope='GLOBAL')
+            else:
+                user_envs = user_envs.none()
+
+            if environment not in user_envs:
+                return Response(
+                    {'error': '无权激活该环境'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # 取消该用户同作用域其他环境的激活,再激活当前环境(单条 UPDATE,原子操作)
+            user_envs.exclude(pk=environment.pk).update(is_active=False)
+            Environment.objects.filter(pk=environment.pk).update(is_active=True)
+            environment.refresh_from_db()
+
+        return Response({'message': '环境已激活', 'is_active': environment.is_active})
 
     def perform_create(self, serializer):
         """创建环境时记录日志"""
@@ -488,6 +507,13 @@ class RequestHistoryViewSet(viewsets.ModelViewSet):
     filterset_fields = ['request__request_type', 'status_code']
     ordering = ['-executed_at']
     pagination_class = StandardPagination
+
+    def get_serializer_class(self):
+        # list 接口走轻量序列化器,避免把所有历史的响应体一次性返回
+        if self.action == 'list':
+            from .serializers import RequestHistoryListSerializer
+            return RequestHistoryListSerializer
+        return RequestHistorySerializer
     
     def get_queryset(self):
         user = self.request.user
@@ -562,7 +588,7 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
             execution = engine.run()
         except Exception as e:
             logger.exception("套件执行异常")
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_400_BAD_REQUEST)
 
         log_operation(
             operation_type='execute',
@@ -611,11 +637,19 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
         """添加请求到测试套件"""
         test_suite = self.get_object()
         request_ids = request.data.get('request_ids', [])
-        
+
+        # 限定只能添加当前用户可见的 ApiRequest,防止越权引用他人接口
+        visible_request_qs = ApiRequestViewSet(request=request).get_queryset()
+
         try:
+            added = []
+            skipped = []
             for request_id in request_ids:
-                api_request = ApiRequest.objects.get(id=request_id)
-                TestSuiteRequest.objects.get_or_create(
+                api_request = visible_request_qs.filter(id=request_id).first()
+                if api_request is None:
+                    skipped.append(request_id)
+                    continue
+                _, created = TestSuiteRequest.objects.get_or_create(
                     test_suite=test_suite,
                     request=api_request,
                     defaults={
@@ -624,11 +658,18 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
                         'assertions': []
                     }
                 )
-            
-            return Response({'message': '添加成功'})
-            
+                if created:
+                    added.append(request_id)
+
+            return Response({
+                'message': '添加成功',
+                'added': added,
+                'skipped': skipped,
+            })
+
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception('Exception')
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class TestSuiteRequestViewSet(viewsets.ModelViewSet):
@@ -862,7 +903,7 @@ class TestDatasetViewSet(viewsets.ModelViewSet):
             execution = engine.run()
         except Exception as e:
             logger.exception("数据集批量执行异常")
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_400_BAD_REQUEST)
 
         log_operation(
             operation_type='execute',
@@ -2428,9 +2469,11 @@ class AIServiceConfigViewSet(viewsets.ModelViewSet):
         except requests.exceptions.Timeout:
             return Response({'error': '连接超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as e:
-            return Response({'error': f'连接失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('requests')
+            return Response({'error': '连接失败,请检查网络或服务端'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            return Response({'error': f'未知错误: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('Exception')
+            return Response({'error': '服务器内部错误,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def complete_parameter_descriptions(self, request):
@@ -2535,9 +2578,11 @@ URL参数:
         except requests.exceptions.Timeout:
             return Response({'error': 'AI服务调用超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as e:
-            return Response({'error': f'AI服务调用失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('requests')
+            return Response({'error': 'AI 服务调用失败,请稍后重试'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            return Response({'error': f'未知错误: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('Exception')
+            return Response({'error': '服务器内部错误,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def generate_mock_data(self, request):
@@ -2607,9 +2652,11 @@ URL参数:
         except requests.exceptions.Timeout:
             return Response({'error': 'AI服务调用超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as e:
-            return Response({'error': f'AI服务调用失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('requests')
+            return Response({'error': 'AI 服务调用失败,请稍后重试'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            return Response({'error': f'未知错误: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('Exception')
+            return Response({'error': '服务器内部错误,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def normalize_parameter_names(self, request):
@@ -2683,9 +2730,11 @@ URL参数:
         except requests.exceptions.Timeout:
             return Response({'error': 'AI服务调用超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as e:
-            return Response({'error': f'AI服务调用失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('requests')
+            return Response({'error': 'AI 服务调用失败,请稍后重试'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            return Response({'error': f'未知错误: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('Exception')
+            return Response({'error': '服务器内部错误,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def extract_documentation(self, request):
@@ -2766,6 +2815,8 @@ URL参数: {json.dumps(request_data['params'], ensure_ascii=False)}
         except requests.exceptions.Timeout:
             return Response({'error': 'AI服务调用超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as e:
-            return Response({'error': f'AI服务调用失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('requests')
+            return Response({'error': 'AI 服务调用失败,请稍后重试'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            return Response({'error': f'未知错误: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('Exception')
+            return Response({'error': '服务器内部错误,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

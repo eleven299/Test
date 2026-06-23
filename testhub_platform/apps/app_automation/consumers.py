@@ -41,6 +41,13 @@ class AppExecutionConsumer(AsyncJsonWebsocketConsumer):
                     logger.warning(f"WebSocket 用户 {user.username} 无权访问执行 {self.execution_id}")
                     await self.close()
                     return
+            else:
+                # 无项目时,仅允许触发该执行的用户本人连接
+                exec_user = getattr(execution, 'user', None)
+                if exec_user is None or exec_user != user:
+                    logger.warning(f"WebSocket 用户 {user.username} 无权访问无项目执行 {self.execution_id}")
+                    await self.close()
+                    return
 
             await self.channel_layer.group_add(self.group_name, self.channel_name)
             await self.accept()

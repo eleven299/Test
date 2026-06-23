@@ -95,7 +95,9 @@ class HomeCardClickView(APIView):
             return Response({'detail': 'card_type 不能为空'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            obj, created = HomeCardClickStat.objects.get_or_create(card_type=card_type)
+            # 使用 select_for_update 锁住计数行;若不存在则用 get_or_create 兜底创建
+            # 避免"并发创建同 card_type"导致的 IntegrityError
+            obj, created = HomeCardClickStat.objects.select_for_update().get_or_create(card_type=card_type)
             if created:
                 obj.click_count = 1
             else:

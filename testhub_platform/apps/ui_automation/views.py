@@ -255,7 +255,8 @@ class ElementViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_backup_locator(self, request, pk=None):
-        """添加备用定位器"""
+        """添加备用定位器(并发安全:使用事务 + 重新读取,避免读改写覆盖)"""
+        from django.db import transaction
         element = self.get_object()
         strategy = request.data.get('strategy')
         value = request.data.get('value')
@@ -263,10 +264,13 @@ class ElementViewSet(viewsets.ModelViewSet):
         if not strategy or not value:
             return Response({'error': '策略和值都是必需的'}, status=status.HTTP_400_BAD_REQUEST)
 
-        backup_locators = element.backup_locators or []
-        backup_locators.append({'strategy': strategy, 'value': value})
-        element.backup_locators = backup_locators
-        element.save()
+        with transaction.atomic():
+            # select_for_update 锁定该行直到事务结束,防止并发读改写丢更新
+            locked = Element.objects.select_for_update().filter(pk=element.pk).first()
+            backup_locators = list(locked.backup_locators or [])
+            backup_locators.append({'strategy': strategy, 'value': value})
+            locked.backup_locators = backup_locators
+            locked.save(update_fields=['backup_locators'])
 
         return Response({'message': '备用定位器添加成功'})
 
@@ -278,35 +282,64 @@ class ElementViewSet(viewsets.ModelViewSet):
         return Response({'suggestions': suggestions})
 
     def _perform_element_validation(self, element):
-        """执行元素验证（模拟实现）"""
-        try:
-            # 这里可以集成实际的浏览器自动化工具进行验证
-            # 现在只是简单的语法检查
-            is_valid = True
-            message = "定位器验证通过"
-            suggestions = []
+        """执行元素验证:对 CSS/XPath 做真实的语法检查,避免误导用户"""
+        suggestions = []
+        strategy = (element.locator_strategy.name if element.locator_strategy else '').lower()
+        value = (element.locator_value or '').strip()
 
-            # 简单的语法检查
-            if element.locator_strategy.name == 'css':
-                if not element.locator_value.strip():
-                    is_valid = False
-                    message = "CSS选择器不能为空"
-            elif element.locator_strategy.name == 'xpath':
-                if not element.locator_value.strip():
-                    is_valid = False
-                    message = "XPath表达式不能为空"
-
-            return {
-                'is_valid': is_valid,
-                'validation_message': message,
-                'suggestions': suggestions
-            }
-        except Exception as e:
+        if not value:
             return {
                 'is_valid': False,
-                'validation_message': f'验证过程中出现错误: {str(e)}',
+                'validation_message': '定位器值不能为空',
                 'suggestions': []
             }
+
+        if strategy == 'css':
+            try:
+                from lxml.cssselect import CSSSelector
+                CSSSelector(value)  # 解析失败会抛 SelectorSyntaxError
+                message = 'CSS 选择器语法验证通过'
+            except Exception as e:
+                return {
+                    'is_valid': False,
+                    'validation_message': f'CSS 选择器语法错误: {e}',
+                    'suggestions': ['请检查选择器括号、引号是否匹配,参考 CSS3 选择器规范']
+                }
+        elif strategy == 'xpath':
+            try:
+                from lxml import etree
+                etree.XPath(value)  # 编译失败会抛 XPathEvalError / ExpressionError
+                message = 'XPath 表达式语法验证通过'
+            except etree.XPathError as e:
+                return {
+                    'is_valid': False,
+                    'validation_message': f'XPath 表达式错误: {e}',
+                    'suggestions': ['请检查轴、谓语、函数调用是否完整']
+                }
+        elif strategy in ('id', 'name'):
+            if any(ch in value for ch in (' ', '"', "'", '<', '>')):
+                return {
+                    'is_valid': False,
+                    'validation_message': f'{strategy} 定位器包含非法字符',
+                    'suggestions': []
+                }
+            message = f'{strategy} 定位器验证通过'
+        elif strategy in ('class_name', 'tag_name'):
+            if not value.replace('_', '').replace('-', '').isalnum():
+                return {
+                    'is_valid': False,
+                    'validation_message': f'{strategy} 包含非法字符',
+                    'suggestions': []
+                }
+            message = f'{strategy} 定位器验证通过'
+        else:
+            message = '定位器验证通过(未识别的策略,仅做非空检查)'
+
+        return {
+            'is_valid': True,
+            'validation_message': message,
+            'suggestions': suggestions
+        }
 
     def _build_element_tree(self, elements):
         """构建元素树形结构 - 返回元素列表而不是页面分组，因为前端会自己处理页面关联"""
@@ -715,8 +748,27 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
         test_case_id = request.data.get('test_case_id')
         order = request.data.get('order', 0)
 
+        # 校验目标 test_case 必须与 test_suite 处于同一项目且用户可见,防止越权
+        from .models import TestCase as UiTestCase, TestSuiteTestCase
+        accessible_projects = UiProject.objects.filter(
+            models.Q(owner=request.user) | models.Q(members=request.user)
+        ).distinct()
+        test_case = UiTestCase.objects.filter(
+            id=test_case_id, project__in=accessible_projects
+        ).first()
+        if test_case is None:
+            return Response(
+                {'error': '测试用例不存在或无权访问'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if test_case.project_id and test_suite.project_id and \
+                test_case.project_id != test_suite.project_id:
+            return Response(
+                {'error': '测试用例与测试套件不属于同一项目'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
-            from .models import TestSuiteTestCase
             suite_test_case = TestSuiteTestCase.objects.create(
                 test_suite=test_suite,
                 test_case_id=test_case_id,
@@ -725,7 +777,8 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
             serializer = TestSuiteTestCaseSerializer(suite_test_case)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception('Exception')
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['delete'])
     def remove_test_case(self, request, pk=None):
@@ -760,7 +813,8 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
 
             return Response({'message': '顺序更新成功'}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception('Exception')
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])
     def run_suite(self, request, pk=None):
@@ -1018,8 +1072,8 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            logger.error(f"复制测试用例失败: {str(e)}")
-            return Response({'error': f"复制失败: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("复制测试用例失败")
+            return Response({'error': '复制失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def perform_update(self, serializer):
         # 更新测试用例步骤
@@ -1077,178 +1131,6 @@ class TestCaseViewSet(viewsets.ModelViewSet):
 
             logger.info(f"成功创建了 {created_count} 个新步骤")
 
-    def _generate_step_log(self, step, step_result='success'):
-        """根据测试步骤生成执行日志"""
-        import time
-
-        # 模拟执行时间（0.1秒到2秒之间）
-        execution_time = round(random.uniform(0.1, 2.0), 2)
-
-        # 构建基础日志
-        log_parts = []
-
-        # 步骤信息
-        if step.element:
-            element_name = step.element.name
-            locator_info = f"{step.element.locator_strategy.name}={step.element.locator_value}"
-        else:
-            element_name = "页面"
-            locator_info = "无"
-
-        # 根据操作类型生成具体日志
-        if step.action_type == 'click':
-            log_parts.append(f"点击元素 '{element_name}'")
-            log_parts.append(f"- 使用定位器: {locator_info}")
-            if step_result == 'success':
-                log_parts.append(f"- 元素点击成功 - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 元素点击失败 - 元素未找到或不可点击")
-
-        elif step.action_type == 'fill':
-            log_parts.append(f"在元素 '{element_name}' 中输入文本")
-            log_parts.append(f"- 使用定位器: {locator_info}")
-            log_parts.append(f"- 输入值: '{step.input_value}'")
-            if step_result == 'success':
-                log_parts.append(f"- 文本输入成功 - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 文本输入失败 - 元素未找到或不可编辑")
-
-        elif step.action_type == 'getText':
-            log_parts.append(f"获取元素 '{element_name}' 的文本内容")
-            log_parts.append(f"- 使用定位器: {locator_info}")
-            if step_result == 'success':
-                # 模拟获取到的文本
-                mock_text = f"示例文本内容_{step.id}" if step.id else "示例文本内容"
-                log_parts.append(f"- 获取到文本: '{mock_text}' - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 获取文本失败 - 元素未找到")
-
-        elif step.action_type == 'waitFor':
-            log_parts.append(f"等待元素 '{element_name}' 出现")
-            log_parts.append(f"- 使用定位器: {locator_info}")
-            log_parts.append(f"- 超时时间: {step.wait_time / 1000}秒")
-            if step_result == 'success':
-                log_parts.append(f"- 元素在 {execution_time}s 后出现")
-            else:
-                log_parts.append(f"- 等待超时 - 元素未在指定时间内出现")
-
-        elif step.action_type == 'hover':
-            log_parts.append(f"在元素 '{element_name}' 上悬停")
-            log_parts.append(f"- 使用定位器: {locator_info}")
-            if step_result == 'success':
-                log_parts.append(f"- 悬停操作成功 - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 悬停操作失败 - 元素未找到")
-
-        elif step.action_type == 'scroll':
-            log_parts.append(f"滚动到元素 '{element_name}'")
-            log_parts.append(f"- 使用定位器: {locator_info}")
-            if step_result == 'success':
-                log_parts.append(f"- 滚动操作成功 - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 滚动操作失败 - 元素未找到")
-
-        elif step.action_type == 'screenshot':
-            log_parts.append(f"执行截图操作")
-            if step.element:
-                log_parts.append(f"- 截图范围: 元素 '{element_name}'")
-            else:
-                log_parts.append(f"- 截图范围: 整个页面")
-            if step_result == 'success':
-                screenshot_name = f"screenshot_{int(time.time())}.png"
-                log_parts.append(f"- 截图保存成功: {screenshot_name} - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 截图保存失败")
-
-        elif step.action_type == 'assert':
-            log_parts.append(f"执行断言验证")
-            log_parts.append(f"- 断言类型: {step.assert_type}")
-            if step.assert_value:
-                log_parts.append(f"- 期望值: '{step.assert_value}'")
-            if step_result == 'success':
-                log_parts.append(f"- 断言通过 - 耗时 {execution_time}s")
-            else:
-                log_parts.append(f"- 断言失败 - 实际值与期望值不匹配")
-
-        elif step.action_type == 'wait':
-            log_parts.append(f"固定等待")
-            log_parts.append(f"- 等待时间: {step.wait_time / 1000}秒")
-            log_parts.append(f"- 等待完成")
-
-        else:
-            # 默认处理其他操作类型
-            log_parts.append(f"执行操作: {step.action_type}")
-            if step.element:
-                log_parts.append(f"- 目标元素: {element_name}")
-            if step.input_value:
-                log_parts.append(f"- 输入值: {step.input_value}")
-            log_parts.append(f"- 操作{'成功' if step_result == 'success' else '失败'} - 耗时 {execution_time}s")
-
-        # 如果步骤有描述，添加到日志中
-        if step.description:
-            log_parts.insert(0, f"说明: {step.description}")
-
-        return '\n'.join(log_parts)
-
-    def _generate_failure_screenshot(self, step_number, step_description):
-        """生成失败截图的模拟数据（base64格式）"""
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-            import io
-            import base64
-
-            # 创建一个模拟的失败截图
-            # 实际应用中，这里应该是通过Playwright/Selenium捕获真实的页面截图
-            width, height = 1280, 720
-            img = Image.new('RGB', (width, height), color=(240, 240, 245))
-            draw = ImageDraw.Draw(img)
-
-            # 绘制标题区域
-            draw.rectangle([0, 0, width, 80], fill=(220, 53, 69))
-
-            # 添加文本信息（使用默认字体）
-            try:
-                # 尝试使用系统字体
-                font_title = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 40)
-                font_text = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 24)
-            except:
-                # 如果系统字体不可用，使用默认字体
-                font_title = ImageFont.load_default()
-                font_text = ImageFont.load_default()
-
-            # 标题
-            draw.text((40, 20), "测试步骤执行失败", fill=(255, 255, 255), font=font_title)
-
-            # 失败信息
-            info_y = 120
-            draw.text((40, info_y), f"失败步骤: 步骤 {step_number}", fill=(50, 50, 50), font=font_text)
-            draw.text((40, info_y + 40), f"步骤说明: {step_description}", fill=(50, 50, 50), font=font_text)
-            draw.text((40, info_y + 80), f"失败时间: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                      fill=(50, 50, 50), font=font_text)
-
-            # 绘制一个模拟的浏览器窗口
-            browser_y = info_y + 140
-            draw.rectangle([40, browser_y, width - 40, height - 40], outline=(200, 200, 200), width=2)
-            draw.rectangle([40, browser_y, width - 40, browser_y + 40], fill=(200, 200, 200))
-            draw.text((60, browser_y + 10), "模拟浏览器页面 - 失败截图", fill=(80, 80, 80), font=font_text)
-
-            # 在浏览器窗口中绘制错误提示
-            error_y = browser_y + 80
-            draw.text((60, error_y), "× 元素定位失败或操作执行异常", fill=(220, 53, 69), font=font_text)
-            draw.text((60, error_y + 40), "× 请检查元素定位器是否正确", fill=(220, 53, 69), font=font_text)
-            draw.text((60, error_y + 80), "× 或页面加载是否完成", fill=(220, 53, 69), font=font_text)
-
-            # 转换为base64
-            buffer = io.BytesIO()
-            img.save(buffer, format='PNG')
-            img_base64 = base64.b64encode(buffer.getvalue()).decode()
-
-            return f"data:image/png;base64,{img_base64}"
-
-        except Exception as e:
-            logger.error(f"生成失败截图时出错: {str(e)}")
-            # 返回一个简单的错误占位符
-            return None
 
     @action(detail=True, methods=['post'])
     def run(self, request, pk=None):
@@ -2000,7 +1882,7 @@ class TestCaseExecutionViewSet(viewsets.ModelViewSet):
             return Response({'message': f'成功删除 {deleted_count} 条记录', 'deleted_count': deleted_count})
         except Exception as e:
             logger.error(f"批量删除测试用例执行记录失败: {str(e)}", exc_info=True)
-            return Response({'error': f'批量删除失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': '批量删除失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class OperationRecordViewSet(viewsets.ReadOnlyModelViewSet):
@@ -3080,7 +2962,8 @@ class AICaseViewSet(viewsets.ModelViewSet):
                     ai_case.task_description,
                     analysis_callback=on_analysis_complete,
                     step_callback=on_step_update,
-                    should_stop=should_stop
+                    should_stop=should_stop,
+                    user=request.user
                 )
 
                 # 检查是否是手动停止
@@ -3461,7 +3344,7 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
             return Response({'message': f'成功删除 {deleted_count} 条记录', 'deleted_count': deleted_count})
         except Exception as e:
             logger.error(f"批量删除AI执行记录失败: {str(e)}", exc_info=True)
-            return Response({'error': f'批量删除失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': '批量删除失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'], url_path='run_adhoc')
     def run_adhoc(self, request):
@@ -3625,7 +3508,8 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     should_stop=should_stop_async,  # 传递异步版本
                     execution_mode=execution_mode,
                     enable_gif=enable_gif,  # 传递GIF录制开关
-                    case_name=task_description[:50] if task_description else "Adhoc Task"  # 传递用例名称用于GIF文件命名
+                    case_name=task_description[:50] if task_description else "Adhoc Task",  # 传递用例名称用于GIF文件命名
+                    user=request.user
                 )
 
                 # 检查是否是手动停止 (使用同步版本)
@@ -3743,7 +3627,8 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     return Response({'message': '任务已标记为停止'})
                 return Response({'message': '任务不在运行中'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('Exception')
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _process_gif_recording(self, execution_record, history):
         """

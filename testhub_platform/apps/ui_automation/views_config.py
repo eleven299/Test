@@ -192,7 +192,8 @@ class EnvironmentConfigViewSet(viewsets.ViewSet):
             subprocess.run([sys.executable, '-m', 'playwright', 'install', browser], check=True)
             return Response({'message': f'Successfully installed driver for {browser}'})
         except subprocess.CalledProcessError as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception('subprocess')
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 import requests
@@ -464,7 +465,7 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
         logger.info(f"模型类型: {config.model_type}")
         logger.info(f"模型名称: {config.model_name}")
         logger.info(f"API URL: {config.base_url}")
-        logger.info(f"API Key前缀: {config.api_key[:10]}..." if len(config.api_key) > 10 else f"API Key: {config.api_key}")
+        # 不再记录 API Key 任何片段
 
         base_url = config.base_url
         if not base_url:

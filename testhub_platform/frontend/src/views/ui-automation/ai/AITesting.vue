@@ -136,7 +136,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, computed } from 'vue'
+import { ref, reactive, nextTick, computed, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { VideoPlay, DocumentAdd, CircleCheckFilled, CircleCheck, Loading, SwitchButton } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -156,6 +156,8 @@ const logs = ref('')
 const plannedTasks = ref([])
 const currentExecutionId = ref(null)
 const logContainer = ref(null)
+// 轮询句柄, 组件卸载时必须清理, 否则 setInterval 在后台继续发请求
+let logPollHandle = null
 
 const taskForm = reactive({
   description: '',
@@ -219,33 +221,40 @@ const handleStop = async () => {
 
 // 轮询日志
 const pollLogs = () => {
-  const pollInterval = setInterval(async () => {
+  // 防御:同一组件多次启动时先清掉旧轮询
+  if (logPollHandle) {
+    clearInterval(logPollHandle)
+    logPollHandle = null
+  }
+  logPollHandle = setInterval(async () => {
     if (!currentExecutionId.value) {
-      clearInterval(pollInterval)
+      clearInterval(logPollHandle)
+      logPollHandle = null
       return
     }
-    
+
     try {
       const response = await getAIExecutionRecordDetail(currentExecutionId.value)
       const record = response.data
-      
+
       logs.value = record.logs || ''
       plannedTasks.value = record.planned_tasks || []
-      
+
       // 如果获取到了任务列表，则取消“分析中”状态
       if (plannedTasks.value.length > 0) {
         analyzing.value = false
       }
-      
+
       // 滚动到底部
       nextTick(() => {
         if (logContainer.value) {
           logContainer.value.scrollTop = logContainer.value.scrollHeight
         }
       })
-      
+
       if (record.status === 'passed' || record.status === 'failed' || record.status === 'stopped') {
-        clearInterval(pollInterval)
+        clearInterval(logPollHandle)
+        logPollHandle = null
         running.value = false
         analyzing.value = false // 确保结束时必然取消分析状态
         if (record.status === 'passed') {
@@ -262,6 +271,14 @@ const pollLogs = () => {
     }
   }, 2000) // 每2秒轮询一次
 }
+
+// 组件卸载时清理轮询,避免内存泄漏与幽灵请求
+onBeforeUnmount(() => {
+  if (logPollHandle) {
+    clearInterval(logPollHandle)
+    logPollHandle = null
+  }
+})
 
 // 保存为用例
 const handleSaveAsCase = () => {

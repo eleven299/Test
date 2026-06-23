@@ -935,17 +935,22 @@ from browser_use.browser.profile import BrowserProfile
 
 
 class BaseBrowserAgent:
-    def __init__(self, execution_mode='text', enable_gif=True, case_name=None):
+    def __init__(self, execution_mode='text', enable_gif=True, case_name=None, user=None):
         self.execution_mode = 'text'
         self.enable_gif = enable_gif  # GIF录制开关
         self.case_name = case_name or "Adhoc Task"  # 用例名称
+        self.user = user
 
         # Load Config from DB
         from apps.requirement_analysis.models import AIModelConfig
 
         # Select Config (always use text mode config)
         role_name = 'browser_use_text'
-        config_obj = AIModelConfig.objects.filter(role=role_name, is_active=True).first()
+        # 仅使用当前用户配置,防止跨用户盗用 API Key
+        config_qs = AIModelConfig.objects.filter(role=role_name, is_active=True)
+        if user is not None:
+            config_qs = config_qs.filter(created_by=user)
+        config_obj = config_qs.first()
 
         model_config = {}
         if config_obj:

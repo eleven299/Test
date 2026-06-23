@@ -47,43 +47,32 @@ class TestReportViewSet(viewsets.ViewSet):
         # 统计数据
         total_plans = plans_qs.count()
         total_cases = ai_cases_qs.count()
-        
-        # 计算测试计划总进度
-        # 遍历所有活跃计划，计算其下所有TestRun的进度平均值
-        total_progress = 0
-        plan_count_for_progress = 0
-        
-        for plan in plans_qs:
-            runs = plan.test_runs.all()
-            if runs.exists():
-                # 计算该计划下所有Run的平均进度
-                run_progresses = [run.progress_stats['progress'] for run in runs]
-                plan_progress = sum(run_progresses) / len(run_progresses)
-                total_progress += plan_progress
-                plan_count_for_progress += 1
-        
-        avg_plan_progress = round(total_progress / plan_count_for_progress, 1) if plan_count_for_progress > 0 else 0
-        
-        # 计算整体通过率
-        recent_runs = TestRun.objects.filter(test_plan__in=plans_qs).order_by('-created_at')[:10]
-        total_executed = 0
-        total_passed = 0
-        
-        for run in recent_runs:
-            stats = run.progress_stats
-            total_executed += stats['tested']
-            total_passed += stats['passed']
-            
+
+        # 一次性拉取所有相关 plan 下的 runs,避免 N+1 查询
+        plans_ids = list(plans_qs.values_list('id', flat=True))
+        runs_qs = TestRun.objects.filter(test_plan_id__in=plans_ids)
+
+        # 计算测试计划总进度(基于 bulk_progress_stats,1 条 GROUP BY 查询)
+        run_ids = list(runs_qs.values_list('id', flat=True))
+        bulk_stats = TestRun.bulk_progress_stats(run_ids)
+        progresses = [s['progress'] for s in bulk_stats.values()]
+        avg_plan_progress = round(sum(progresses) / len(progresses), 1) if progresses else 0
+
+        # 计算整体通过率(最近 10 次 run)
+        recent_run_ids = list(runs_qs.order_by('-created_at').values_list('id', flat=True)[:10])
+        recent_stats = TestRun.bulk_progress_stats(recent_run_ids)
+        total_executed = sum(s['tested'] for s in recent_stats.values())
+        total_passed = sum(s['passed'] for s in recent_stats.values())
         pass_rate = round((total_passed / total_executed * 100), 1) if total_executed > 0 else 0
-        
-        # 统计缺陷总数 (基于 TestRunCase 的 defects 字段)
-        all_runs = TestRun.objects.filter(test_plan__in=plans_qs)
-        defects_count = 0
-        for run in all_runs:
-            run_cases_with_defects = run.run_cases.exclude(defects=[])
-            for rc in run_cases_with_defects:
-                if isinstance(rc.defects, list):
-                    defects_count += len(rc.defects)
+
+        # 统计缺陷总数:单条聚合查询,避免双重 for 循环
+        defects_rows = (
+            TestRunCase.objects
+            .filter(test_run_id__in=run_ids)
+            .exclude(defects=[])
+            .values_list('defects', flat=True)
+        )
+        defects_count = sum(len(d) for d in defects_rows if isinstance(d, list))
         
         return Response({
             'active_plans': total_plans,

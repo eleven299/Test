@@ -42,23 +42,20 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all().order_by('username')
     serializer_class = UserCreateSerializer
     permission_classes = [permissions.AllowAny]
-    
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        
-        # 安全地创建token
-        try:
-            from rest_framework.authtoken.models import Token
-            token, created = Token.objects.get_or_create(user=user)
-            token_key = token.key
-        except ImportError:
-            token_key = f"temp_token_{user.id}"
-        
+
+        # 注册成功即签发 JWT,前端可自动登录
+        refresh = RefreshToken.for_user(user)
+
         return Response({
             'user': UserSerializer(user).data,
-            'token': token_key
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'message': '注册成功'
         }, status=status.HTTP_201_CREATED)
 
 @api_view(['POST'])
@@ -92,8 +89,9 @@ def logout_view(request):
             try:
                 from rest_framework_simplejwt.tokens import RefreshToken as JWTRefreshToken
                 JWTRefreshToken(refresh_token).blacklist()
-            except Exception:
-                pass
+            except Exception as e:
+                # 记录具体异常,而不是静默吞掉——Token 失效/格式错误应可观测
+                logger.warning(f"logout 加入 token 黑名单失败: {type(e).__name__}: {e}")
 
         logout(request)
 

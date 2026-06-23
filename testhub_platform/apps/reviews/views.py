@@ -121,11 +121,17 @@ class TestCaseReviewViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def my_reviews(self, request):
-        """获取我的评审任务"""
+        """获取我的评审任务。
+
+        防御性约束:即便被错误地添加为某个项目的 reviewer,也只能看到
+        自己可访问项目内的评审,避免项目元数据通过 reviewer 渠道泄露。
+        """
+        accessible_projects = _get_accessible_projects(request.user)
         reviews = TestCaseReview.objects.filter(
-            reviewers=request.user
-        ).select_related('creator').prefetch_related('projects')
-        
+            reviewers=request.user,
+            projects__in=accessible_projects
+        ).select_related('creator').prefetch_related('projects').distinct()
+
         serializer = self.get_serializer(reviews, many=True)
         return Response(serializer.data)
 

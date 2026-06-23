@@ -175,6 +175,25 @@ class RequestHistorySerializer(serializers.ModelSerializer):
         ]
 
 
+class RequestHistoryListSerializer(serializers.ModelSerializer):
+    """轻量列表序列化器:不返回 request_data / response_data 大 JSON,
+    避免 history 列表接口把所有历史响应体一次性塞给前端。
+    详情接口请用 RequestHistorySerializer。"""
+    request_name = serializers.CharField(source='request.name', read_only=True)
+    request_method = serializers.CharField(source='request.method', read_only=True)
+    request_url = serializers.CharField(source='request.url', read_only=True)
+    environment_name = serializers.CharField(source='environment.name', read_only=True, default=None)
+    executed_by_username = serializers.CharField(source='executed_by.username', read_only=True, default=None)
+
+    class Meta:
+        model = RequestHistory
+        fields = [
+            'id', 'request_name', 'request_method', 'request_url',
+            'environment_name', 'status_code', 'response_time',
+            'error_message', 'executed_by_username', 'executed_at'
+        ]
+
+
 class TestSuiteRequestSerializer(serializers.ModelSerializer):
     request = ApiRequestSerializer(read_only=True)
     dataset = serializers.PrimaryKeyRelatedField(

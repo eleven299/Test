@@ -114,7 +114,7 @@ class DataFactoryViewSet(viewsets.ModelViewSet):
             return Response(serializer_data)
         except Exception as e:
             logger.error(f'列表方法错误: {str(e)}', exc_info=True)
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': '操作失败,请联系管理员'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def create(self, request, *args, **kwargs):
         """执行工具并保存结果"""
@@ -149,7 +149,8 @@ class DataFactoryViewSet(viewsets.ModelViewSet):
                     # 清除相关缓存
                     self.clear_user_cache(request.user.id)
                 except Exception as e:
-                    return Response({'error': f'保存记录失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    logger.exception('Exception')
+                    return Response({'error': '保存记录失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             return Response(result, status=status.HTTP_200_OK)
 
@@ -177,7 +178,7 @@ class DataFactoryViewSet(viewsets.ModelViewSet):
             return Response({'error': '记录不存在'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.error(f'删除记录失败: {str(e)}, ID={kwargs.get("pk")}, 用户ID={request.user.id}', exc_info=True)
-            return Response({'error': f'删除失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': '删除失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def clear_user_cache(self, user_id):
         """清除用户相关的缓存"""

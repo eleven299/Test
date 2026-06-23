@@ -59,7 +59,7 @@ class TestRun(models.Model):
         total = self.run_cases.count()
         if total == 0:
             return {'total': 0, 'untested': 0, 'passed': 0, 'failed': 0, 'blocked': 0, 'retest': 0, 'progress': 0}
-        
+
         stats = {
             'total': total,
             'untested': self.run_cases.filter(status='untested').count(),
@@ -71,6 +71,40 @@ class TestRun(models.Model):
         stats['tested'] = stats['passed'] + stats['failed'] + stats['blocked'] + stats['retest']
         stats['progress'] = round((stats['tested'] / total) * 100, 1) if total > 0 else 0
         return stats
+
+    @classmethod
+    def bulk_progress_stats(cls, run_ids):
+        """批量计算多个 TestRun 的 progress_stats,避免 N×5 查询。
+
+        返回 {run_id: {total,untested,passed,failed,blocked,retest,tested,progress}} 字典。
+        """
+        from django.db.models import Count, Q
+
+        run_ids = list(run_ids or [])
+        if not run_ids:
+            return {}
+
+        rows = (
+            TestRunCase.objects
+            .filter(test_run_id__in=run_ids)
+            .values('test_run_id', 'status')
+            .annotate(n=Count('id'))
+        )
+
+        totals = {rid: {'total': 0, 'untested': 0, 'passed': 0, 'failed': 0,
+                         'blocked': 0, 'retest': 0} for rid in run_ids}
+        for row in rows:
+            rid = row['test_run_id']
+            totals[rid]['total'] += row['n']
+            if row['status'] in totals[rid]:
+                totals[rid][row['status']] = row['n']
+
+        result = {}
+        for rid, st in totals.items():
+            tested = st['passed'] + st['failed'] + st['blocked'] + st['retest']
+            progress = round((tested / st['total']) * 100, 1) if st['total'] else 0
+            result[rid] = {**st, 'tested': tested, 'progress': progress}
+        return result
 
 class TestRunCase(models.Model):
     """测试执行用例"""

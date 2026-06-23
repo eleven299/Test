@@ -130,7 +130,7 @@ export const useUserStore = defineStore('user', () => {
 
   const register = async (userData) => {
     try {
-      const response = await api.post('/auth/test-register/', userData)
+      const response = await api.post('/auth/register/', userData)
 
       // 注册成功自动登录
       accessToken.value = response.data.access

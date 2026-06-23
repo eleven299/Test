@@ -156,7 +156,7 @@ class AppScheduledTaskViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             logger.error(f'执行定时任务失败: {str(e)}', exc_info=True)
-            return Response({'success': False, 'message': f'执行失败: {str(e)}'},
+            return Response({'success': False, 'message': '执行失败'},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
