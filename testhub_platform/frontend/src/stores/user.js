@@ -57,107 +57,95 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const login = async (credentials) => {
-    try {
-      const response = await api.post('/auth/login/', credentials)
+    const response = await api.post('/auth/login/', credentials)
 
-      // 保存双token
-      accessToken.value = response.data.access
-      refreshToken.value = response.data.refresh
-      user.value = response.data.user
+    // 保存双token
+    accessToken.value = response.data.access
+    refreshToken.value = response.data.refresh
+    user.value = response.data.user
 
-      // 计算过期时间（当前时间 + 30分钟）
-      const expiresAt = Date.now() + 30 * 60 * 1000
-      tokenExpiresAt.value = expiresAt
+    // 计算过期时间（当前时间 + 30分钟）
+    const expiresAt = Date.now() + 30 * 60 * 1000
+    tokenExpiresAt.value = expiresAt
 
-      // 持久化存储
-      localStorage.setItem('access_token', accessToken.value)
-      localStorage.setItem('refresh_token', refreshToken.value)
-      localStorage.setItem('token_expires_at', expiresAt.toString())
-      localStorage.setItem('user', JSON.stringify(user.value))
+    // 持久化存储
+    localStorage.setItem('access_token', accessToken.value)
+    localStorage.setItem('refresh_token', refreshToken.value)
+    localStorage.setItem('token_expires_at', expiresAt.toString())
+    localStorage.setItem('user', JSON.stringify(user.value))
 
-      // 启动自动刷新
-      startAutoRefresh()
+    // 启动自动刷新
+    startAutoRefresh()
 
-      track('login_success', {
-        event_type: 'business',
-        module: 'auth',
-        page_path: '/login',
-        success: true,
-        metadata: {
-          login_type: 'password'
-        }
-      })
+    track('login_success', {
+      event_type: 'business',
+      module: 'auth',
+      page_path: '/login',
+      success: true,
+      metadata: {
+        login_type: 'password'
+      }
+    })
 
-      return response.data
-    } catch (error) {
-      throw error
-    }
+    return response.data
   }
 
   const smsLogin = async (data) => {
-    try {
-      const response = await api.post('/auth/sms-login/', data)
+    const response = await api.post('/auth/sms-login/', data)
 
-      accessToken.value = response.data.access
-      refreshToken.value = response.data.refresh
-      user.value = response.data.user
+    accessToken.value = response.data.access
+    refreshToken.value = response.data.refresh
+    user.value = response.data.user
 
-      const expiresAt = Date.now() + 30 * 60 * 1000
-      tokenExpiresAt.value = expiresAt
+    const expiresAt = Date.now() + 30 * 60 * 1000
+    tokenExpiresAt.value = expiresAt
 
-      localStorage.setItem('access_token', accessToken.value)
-      localStorage.setItem('refresh_token', refreshToken.value)
-      localStorage.setItem('token_expires_at', expiresAt.toString())
-      localStorage.setItem('user', JSON.stringify(user.value))
+    localStorage.setItem('access_token', accessToken.value)
+    localStorage.setItem('refresh_token', refreshToken.value)
+    localStorage.setItem('token_expires_at', expiresAt.toString())
+    localStorage.setItem('user', JSON.stringify(user.value))
 
-      startAutoRefresh()
+    startAutoRefresh()
 
-      track('login_success', {
-        event_type: 'business',
-        module: 'auth',
-        page_path: '/login',
-        success: true,
-        metadata: {
-          login_type: 'sms'
-        }
-      })
+    track('login_success', {
+      event_type: 'business',
+      module: 'auth',
+      page_path: '/login',
+      success: true,
+      metadata: {
+        login_type: 'sms'
+      }
+    })
 
-      return response.data
-    } catch (error) {
-      throw error
-    }
+    return response.data
   }
 
   const register = async (userData) => {
-    try {
-      const response = await api.post('/auth/register/', userData)
+    const response = await api.post('/auth/register/', userData)
 
-      // 注册成功自动登录
-      accessToken.value = response.data.access
-      refreshToken.value = response.data.refresh
-      user.value = response.data.user
+    // 注册成功自动登录
+    accessToken.value = response.data.access
+    refreshToken.value = response.data.refresh
+    user.value = response.data.user
 
-      const expiresAt = Date.now() + 30 * 60 * 1000
-      tokenExpiresAt.value = expiresAt
+    const expiresAt = Date.now() + 30 * 60 * 1000
+    tokenExpiresAt.value = expiresAt
 
-      localStorage.setItem('access_token', accessToken.value)
-      localStorage.setItem('refresh_token', refreshToken.value)
-      localStorage.setItem('token_expires_at', expiresAt.toString())
-      localStorage.setItem('user', JSON.stringify(user.value))
+    localStorage.setItem('access_token', accessToken.value)
+    localStorage.setItem('refresh_token', refreshToken.value)
+    localStorage.setItem('token_expires_at', expiresAt.toString())
+    localStorage.setItem('user', JSON.stringify(user.value))
 
-      startAutoRefresh()
+    startAutoRefresh()
 
-      track('register_success', {
-        event_type: 'business',
-        module: 'auth',
-        page_path: '/register',
-        success: true
-      })
+    track('register_success', {
+      event_type: 'business',
+      module: 'auth',
+      page_path: '/register',
+      success: true
+    })
 
-      return response.data
-    } catch (error) {
-      throw error
-    }
+    return response.data
   }
 
   // 添加一个标记防止logout过程中的循环调用

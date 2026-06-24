@@ -507,7 +507,7 @@ export default {
         
         for (const line of lines) {
           if (line.includes('测试用例') || line.includes('Test Case') || 
-              line.match(/^(\d+\.|\*|\-|\d+、)/)) {
+              line.match(/^(\d+\.|\*|-|\d+、)/)) {
             
             if (Object.keys(currentTestCase).length > 0) {
               testCases.push(currentTestCase)
@@ -516,7 +516,7 @@ export default {
             
             currentTestCase = {
               caseId: `TC${String(caseNumber).padStart(3, '0')}`,
-              scenario: line.replace(/^(\d+\.|\*|\-|\d+、)\s*/, '').replace(/测试用例\d*[:：]?\s*/, '').replace(/Test Case\s*\d*[:：]?\s*/i, ''),
+              scenario: line.replace(/^(\d+\.|\*|-|\d+、)\s*/, '').replace(/测试用例\d*[:：]?\s*/, '').replace(/Test Case\s*\d*[:：]?\s*/i, ''),
               precondition: '',
               steps: '',
               expected: '',

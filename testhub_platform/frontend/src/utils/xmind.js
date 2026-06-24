@@ -233,7 +233,7 @@ export function parseTestCasesFromContent(content) {
     const trimmed = line.trim()
     if (!trimmed) continue
 
-    if (trimmed.match(/^(测试用例|Test Case|\d+[\.、\)])/) ||
+    if (trimmed.match(/^(测试用例|Test Case|\d+[.、)])/) ||
         trimmed.match(/^(TC|TEST)[-_]?\d+/i)) {
       if (current) {
         result.push(current)
@@ -241,7 +241,7 @@ export function parseTestCasesFromContent(content) {
       }
       current = {
         caseId: `TC${String(caseNum + 1).padStart(3, '0')}`,
-        scenario: trimmed.replace(/^(测试用例\d*[:：]?\s*|Test Case\s*\d*[:：]?\s*|\d+[\.、\)]\s*)/i, ''),
+        scenario: trimmed.replace(/^(测试用例\d*[:：]?\s*|Test Case\s*\d*[:：]?\s*|\d+[.、)]\s*)/i, ''),
         precondition: '',
         steps: '',
         expected: '',

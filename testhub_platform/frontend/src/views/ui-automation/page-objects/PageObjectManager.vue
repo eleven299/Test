@@ -128,7 +128,7 @@
                     </div>
                     <div v-else class="element-canvas">
                       <div
-                        v-for="(poElement, index) in pageObjectElements"
+                        v-for="(poElement, _index) in pageObjectElements"
                         :key="poElement.id"
                         class="canvas-element"
                         @click="selectCanvasElement(poElement)"
@@ -487,7 +487,7 @@ const handleDrop = (event) => {
   }
 
   // 自动生成方法名称
-  const methodName = elementData.name.replace(/[\s\-]/g, '')
+  const methodName = elementData.name.replace(/[\s-]/g, '')
     .replace(/^./, elementData.name.charAt(0).toLowerCase())
 
   // 添加元素到页面对象

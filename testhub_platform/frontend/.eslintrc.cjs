@@ -15,6 +15,7 @@ module.exports = {
   },
   rules: {
     'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    'vue/no-unused-vars': ['error', { ignorePattern: '^_' }],
     'vue/multi-word-component-names': 'off',
   },
 };

@@ -176,7 +176,7 @@
                     </template>
                   </el-table-column>
                   <el-table-column :label="$t('uiAutomation.common.operation')" width="120">
-                    <template #default="{ row, $index }">
+                    <template #default="{ row: _row, $index }">
                       <el-button
                         size="small"
                         text
