@@ -1019,7 +1019,7 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
                         finally:
                             loop.close()
                 except Exception as e:
-                    logger.error(f"未保存配置连接测试异常: {repr(e)}")
+                    logger.warning(f"未保存配置连接测试失败(通常为用户输入问题): {repr(e)}")
                     return {
                         'success': False,
                         'message': f'连接测试失败: {str(e)}'
