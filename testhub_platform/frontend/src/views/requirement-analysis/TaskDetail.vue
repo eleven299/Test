@@ -276,7 +276,6 @@
 <script>
 import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DocumentCopy } from '@element-plus/icons-vue'
 import * as XLSX from 'xlsx'
 import { exportToXMind } from '@/utils/xmind'
 

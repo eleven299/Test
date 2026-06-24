@@ -387,7 +387,7 @@ import {
   getTestSuiteList, getTestSuiteExecutions,
   getAppProjects,
 } from '@/api/app-automation.js'
-import { getExecutionStatusType, getExecutionStatusText, getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers.js'
+import { getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers.js'
 
 // ==================== 公共 ====================
 const activeTab = ref('suite')

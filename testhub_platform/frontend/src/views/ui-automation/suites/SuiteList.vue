@@ -261,7 +261,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, Search, Edit, Delete, RefreshRight, Collection,
+  Plus, Search, Edit, Delete, RefreshRight,
   ArrowRight, Top, Bottom
 } from '@element-plus/icons-vue'
 import {
@@ -274,7 +274,6 @@ import {
   getTestSuiteTestCases,
   addTestCaseToTestSuite,
   removeTestCaseFromTestSuite,
-  updateTestCaseOrder,
   runTestSuite
 } from '@/api/ui_automation'
 import { useI18n } from 'vue-i18n'

@@ -298,19 +298,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Search, Edit, Delete, Document,
-  Operation, Folder, Warning
+  Operation, Folder
 } from '@element-plus/icons-vue'
 
 import {
   getUiProjects,
   getPageObjects,
   createPageObject,
-  updatePageObject,
   deletePageObject as deletePageObjectAPI,
   generatePageObjectCode,
   getPageObjectElements,

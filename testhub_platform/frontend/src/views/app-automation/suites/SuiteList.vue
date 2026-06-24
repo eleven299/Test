@@ -303,7 +303,7 @@ import {
   getPackageList,
   getAppProjects,
 } from '@/api/app-automation'
-import { getExecutionStatusType, getExecutionStatusText, getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers'
+import { getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers'
 
 // ===== 响应式数据 =====
 const loading = ref(false)

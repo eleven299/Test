@@ -501,10 +501,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, Plus, Edit, Delete, Check, CaretRight, ArrowUp, ArrowDown, Rank, Picture, Warning, View, ZoomIn, Refresh, WarningFilled, MagicStick
+  Search, Plus, Edit, Delete, Check, CaretRight, Rank, Picture, Warning, ZoomIn, Refresh, WarningFilled, MagicStick
 } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 import DataFactorySelector from '@/components/DataFactorySelector.vue'
@@ -520,8 +520,7 @@ import {
   deleteTestCase as deleteTestCaseApi,
   getTestCases,
   runTestCase as runTestCaseApi,
-  copyTestCase as copyTestCaseApi,
-  getLocatorStrategies
+  copyTestCase as copyTestCaseApi
 } from '@/api/ui_automation'
 import { getVariableFunctions } from '@/api/data-factory'
 

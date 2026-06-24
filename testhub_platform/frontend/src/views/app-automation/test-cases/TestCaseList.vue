@@ -257,7 +257,7 @@ import {
   getWsStatus
 } from '@/api/app-automation'
 import { getDeviceList } from '@/api/app-automation'
-import { getExecutionStatusType, getExecutionStatusText, getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers'
+import { getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers'
 
 const router = useRouter()
 

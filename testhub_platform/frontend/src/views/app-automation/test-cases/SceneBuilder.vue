@@ -899,10 +899,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Download, FolderAdd, DocumentCopy, Check, Search, Link, Refresh, Camera } from '@element-plus/icons-vue'
+import { Upload, Download, FolderAdd, Check, Search, Link, Refresh, Camera } from '@element-plus/icons-vue'
 import draggable from "vuedraggable"
 import CaptureElementDialog from '../elements/components/CaptureElementDialog.vue'
 import {
@@ -918,7 +918,6 @@ import {
   updateTestCase,
   getAppElementList,
   getAppImageCategories,
-  getDeviceList,
   getAppProjects
 } from '@/api/app-automation'
 

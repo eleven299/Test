@@ -5,6 +5,7 @@ module.exports = {
     es2022: true,
     node: true,
   },
+  plugins: ['unused-imports'],
   extends: [
     'eslint:recommended',
     'plugin:vue/vue3-essential',
@@ -14,7 +15,14 @@ module.exports = {
     sourceType: 'module',
   },
   rules: {
-    'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    'no-unused-vars': 'off',
+    'unused-imports/no-unused-imports': 'error',
+    'unused-imports/no-unused-vars': ['warn', {
+      vars: 'all',
+      varsIgnorePattern: '^_',
+      args: 'after-used',
+      argsIgnorePattern: '^_',
+    }],
     'vue/no-unused-vars': ['error', { ignorePattern: '^_' }],
     'vue/multi-word-component-names': 'off',
   },

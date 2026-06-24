@@ -271,16 +271,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, FolderAdd, Document, Search, Edit, Delete,
-  Folder, Document as DocumentIcon, Operation, DocumentCopy, ArrowDown
+  Plus, Document, Folder
 } from '@element-plus/icons-vue'
 import {
   getUiProjects,
-  getElements,
   createElement,
   getElementDetail,
   updateElement,
@@ -291,9 +289,7 @@ import {
   createElementGroup,
   updateElementGroup,
   deleteElementGroup,
-  getLocatorStrategies,
-  validateElementLocator,
-  generateElementSuggestions
+  getLocatorStrategies
 } from '@/api/ui_automation'
 
 // 国际化
@@ -443,8 +439,6 @@ const editInputRef = ref(null)
 
 // 状态
 const saving = ref(false)
-const validating = ref(false)
-const generating = ref(false)
 const suggestions = ref([])
 
 
@@ -509,45 +503,8 @@ const loadProjects = async () => {
   }
 }
 
-// 提供控制台调试帮助函数
-const debugTree = () => {
-  if (typeof window !== 'undefined') {
-    console.log('=== 树数据调试 ===')
-    console.log('treeData:', treeData.value)
-    console.log('页面对象:',
-      treeData.value.map(p => ({
-        id: p.id,
-        name: p.name,
-        type: p.type,
-        children: p.children?.length || 0,
-        elementChildren: p.children?.filter(c => c.type === 'element').map(e => e.name) || []
-      }))
-    )
 
-    // 找出所有元素
-    const allElements = []
-    const findElements = (nodes, parent) => {
-      nodes.forEach(node => {
-        if (node.type === 'element') {
-          allElements.push({
-            name: node.name,
-            id: node.id,
-            parent: parent
-          })
-        } else if (node.type === 'page' && node.children) {
-          findElements(node.children, node.name)
-        }
-      })
-    }
-    findElements(treeData.value, null)
-    console.log('所有元素:', allElements)
 
-    // 暴露到window
-    window.debugTreeData = debugTree
-    console.log('调试函数已挂载到 window.debugTreeData()')
-    console.log('===============================')
-  }
-}
 
 // 加载定位策略
 const loadLocatorStrategies = async () => {
@@ -568,28 +525,6 @@ const loadPages = async () => {
     pages.value = response.data?.results || response.data || []
   } catch (error) {
     console.error('获取页面失败:', error)
-  }
-}
-
-// 加载页面树结构
-const loadPageTree = async () => {
-  if (!selectedProject.value) return
-
-  try {
-    const response = await getElementGroupTree({ project: selectedProject.value })
-    // 构建完整的树形结构
-    const buildTree = (groups) => {
-      return groups.map(group => ({
-        ...group,
-        type: 'page',
-        children: group.children ? buildTree(group.children) : []
-      }))
-    }
-
-    treeData.value = buildTree(response.data || [])
-  } catch (error) {
-    console.error('获取页面树失败:', error)
-    treeData.value = []
   }
 }
 
@@ -1068,43 +1003,6 @@ const saveElement = async () => {
     ElMessage.error(t('uiAutomation.element.messages.saveFailed') + ': ' + (error.response?.data?.message || error.message || t('uiAutomation.messages.error.unknown')))
   } finally {
     saving.value = false
-  }
-}
-
-// 验证元素
-const validateElement = async () => {
-  if (!selectedElement.value) return
-
-  try {
-    validating.value = true
-    const response = await validateElementLocator(selectedElement.value.id)
-    const result = response.data
-
-    if (result.is_valid) {
-      ElMessage.success(t('uiAutomation.element.messages.validateSuccess'))
-    } else {
-      ElMessage.error(`${t('uiAutomation.element.messages.validateFailed')}: ${result.validation_message}`)
-    }
-  } catch (error) {
-    ElMessage.error(t('uiAutomation.element.messages.validateFailed'))
-    console.error('验证元素失败:', error)
-  } finally {
-    validating.value = false
-  }
-}
-
-// 生成建议
-const generateSuggestions = async () => {
-  if (!selectedElement.value) return
-
-  try {
-    generating.value = true
-    const response = await generateElementSuggestions(selectedElement.value.id)
-    suggestions.value = response.data.suggestions
-  } catch (error) {
-    console.error('生成建议失败:', error)
-  } finally {
-    generating.value = false
   }
 }
 

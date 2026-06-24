@@ -168,7 +168,7 @@ import {
   getAppProjects
 } from '@/api/app-automation'
 import { Search, Refresh } from '@element-plus/icons-vue'
-import { getExecutionStatusType, getExecutionStatusText, getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers'
+import { getDisplayStatus, formatDateTime } from '@/utils/app-automation-helpers'
 
 const loading = ref(false)
 const executions = ref([])
